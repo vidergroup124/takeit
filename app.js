@@ -56,11 +56,59 @@ const DEFAULT_SETTINGS = {
   bankInfo: 'MAKE by KBank (ธ.กสิกรไทย) ชื่อบัญชี: นาย ภาณุเดช พุทธบัวงาม',
   qrImageUrl: 'payment-qr.jpg',
   shippingFee: 60,
-  cloudProvider: 'local', // 'local' | 'firebase' | 'supabase'
-  firebaseConfigJson: '',
+  cloudProvider: 'firebase', // Default to Firebase Cloud so all devices see the same products automatically
+  firebaseConfigJson: JSON.stringify({
+    projectId: 'takeit-ebb5e',
+    authDomain: 'takeit-ebb5e.firebaseapp.com',
+    storageBucket: 'takeit-ebb5e.appspot.com'
+  }),
   supabaseUrl: '',
   supabaseKey: ''
 };
+
+function parseFirebaseConfig(rawInput) {
+  const fallbackConfig = {
+    projectId: 'takeit-ebb5e',
+    authDomain: 'takeit-ebb5e.firebaseapp.com',
+    storageBucket: 'takeit-ebb5e.appspot.com'
+  };
+  if (!rawInput || !String(rawInput).trim()) {
+    return fallbackConfig;
+  }
+  const text = String(rawInput).trim();
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && parsed.projectId) return parsed;
+  } catch (e) {}
+
+  // Support pasting raw JavaScript snippet directly from Firebase Console
+  const extracted = {};
+  const keys = ['apiKey', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId', 'appId', 'measurementId'];
+  keys.forEach((k) => {
+    const regex = new RegExp(`["']?${k}["']?\\s*:\\s*["']([^"']+)["']`);
+    const match = text.match(regex);
+    if (match && match[1]) {
+      extracted[k] = match[1].trim();
+    }
+  });
+  return extracted.projectId ? extracted : fallbackConfig;
+}
+
+function sortProductsCatalog(products) {
+  const defaultOrder = new Map(DEFAULT_PRODUCTS.map((p, idx) => [p.id, idx]));
+  return [...products].sort((a, b) => {
+    const aIsCustom = !defaultOrder.has(a.id);
+    const bIsCustom = !defaultOrder.has(b.id);
+    if (aIsCustom && !bIsCustom) return -1;
+    if (!aIsCustom && bIsCustom) return 1;
+    if (aIsCustom && bIsCustom) {
+      const aTime = Number(a.createdAtMs || String(a.id).replace(/\D/g, '') || 0);
+      const bTime = Number(b.createdAtMs || String(b.id).replace(/\D/g, '') || 0);
+      return bTime - aTime;
+    }
+    return (defaultOrder.get(a.id) ?? 999) - (defaultOrder.get(b.id) ?? 999);
+  });
+}
 
 const DEFAULT_PRODUCTS = [
   {
@@ -429,7 +477,20 @@ async function loadInitialData() {
       if (!parsed.sheetWebhookUrl) {
         parsed.sheetWebhookUrl = DEFAULT_SETTINGS.sheetWebhookUrl;
       }
-      state.settings = { ...DEFAULT_SETTINGS, ...parsed, sheetWebhookUrl: parsed.sheetWebhookUrl || DEFAULT_SETTINGS.sheetWebhookUrl };
+      // Upgrade any device that was previously on 'local' mode to 'firebase' (takeit-ebb5e) so all devices sync together
+      if (!parsed.cloudProvider || parsed.cloudProvider === 'local') {
+        parsed.cloudProvider = 'firebase';
+      }
+      if (!parsed.firebaseConfigJson) {
+        parsed.firebaseConfigJson = DEFAULT_SETTINGS.firebaseConfigJson;
+      }
+      state.settings = {
+        ...DEFAULT_SETTINGS,
+        ...parsed,
+        sheetWebhookUrl: parsed.sheetWebhookUrl || DEFAULT_SETTINGS.sheetWebhookUrl,
+        cloudProvider: parsed.cloudProvider || 'firebase',
+        firebaseConfigJson: parsed.firebaseConfigJson || DEFAULT_SETTINGS.firebaseConfigJson
+      };
     } else {
       state.settings = { ...DEFAULT_SETTINGS };
     }
@@ -508,15 +569,11 @@ function saveStateLocally() {
 
 async function initCloudConnection() {
   const pill = document.getElementById('db-status-pill');
-  const provider = state.settings.cloudProvider || 'local';
+  const provider = state.settings.cloudProvider || 'firebase';
 
-  if (provider === 'firebase' && state.settings.firebaseConfigJson) {
+  if (provider === 'firebase') {
     try {
-      const cleaned = state.settings.firebaseConfigJson
-        .replace(/^[^{]*=/, '')
-        .replace(/;\s*$/, '')
-        .trim();
-      const firebaseConfig = JSON.parse(cleaned);
+      const firebaseConfig = parseFirebaseConfig(state.settings.firebaseConfigJson);
 
       // Dynamically load Modular Firebase SDK v10
       const appMod = await import('https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js');
@@ -527,26 +584,28 @@ async function initCloudConnection() {
       state.firestoreDb = db;
       state.firebaseModules = fsMod;
 
-      // Fetch products & orders from Firestore
+      // 1. Initial fetch of products from Firestore
       const prodSnap = await fsMod.getDocs(fsMod.collection(db, 'takeit_products'));
       if (!prodSnap.empty) {
         const cloudProducts = [];
         prodSnap.forEach((docSnap) => cloudProducts.push(docSnap.data()));
-        // Merge cloud products with any newly added products from localStorage to prevent overwriting
         const cloudMap = new Map(cloudProducts.map((p) => [p.id, p]));
-        state.products.forEach((lp) => {
-          if (!cloudMap.has(lp.id)) {
+
+        // Push any custom Admin-created products from this device's localStorage that aren't in Cloud yet
+        for (const lp of state.products) {
+          const isCustomLocal = /^PROD-\d+$/.test(String(lp.id)) || lp.isCustom;
+          if (isCustomLocal && !cloudMap.has(lp.id)) {
             cloudMap.set(lp.id, lp);
-            // Auto sync this newly created product to Firebase
-            fsMod.setDoc(fsMod.doc(db, 'takeit_products', lp.id), lp).catch(() => {});
+            await fsMod.setDoc(fsMod.doc(db, 'takeit_products', lp.id), lp);
           }
-        });
-        state.products = Array.from(cloudMap.values());
+        }
+        state.products = sortProductsCatalog(ensureProductGalleryImages(Array.from(cloudMap.values())));
       } else {
-        // Seed initial products into Firestore
+        // Firestore collection is empty — upload current products to seed Firestore
         await pushAllToCloud();
       }
 
+      // 2. Initial fetch of orders from Firestore
       const orderSnap = await fsMod.getDocs(fsMod.collection(db, 'takeit_orders'));
       if (!orderSnap.empty) {
         const cloudOrders = [];
@@ -555,15 +614,49 @@ async function initCloudConnection() {
         state.orders = cloudOrders;
       }
 
+      // 3. Real-time listeners so any product or order added on one device appears on all other devices automatically
+      if (!state.unsubscribeFirestore) {
+        const unsubProd = fsMod.onSnapshot(fsMod.collection(db, 'takeit_products'), (snap) => {
+          if (snap.empty) return;
+          const liveProducts = [];
+          snap.forEach((d) => liveProducts.push(d.data()));
+          state.products = sortProductsCatalog(ensureProductGalleryImages(liveProducts));
+          saveStateLocally();
+          renderStorefront();
+          if (state.isAdmin) {
+            renderAdminStats();
+            renderAdminProductsTable();
+          }
+        });
+
+        const unsubOrd = fsMod.onSnapshot(fsMod.collection(db, 'takeit_orders'), (snap) => {
+          if (snap.empty) return;
+          const liveOrders = [];
+          snap.forEach((d) => liveOrders.push(d.data()));
+          liveOrders.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+          state.orders = liveOrders;
+          saveStateLocally();
+          if (state.isAdmin) {
+            renderAdminStats();
+            renderAdminOrdersTable();
+          }
+        });
+
+        state.unsubscribeFirestore = () => {
+          unsubProd();
+          unsubOrd();
+        };
+      }
+
       if (pill) {
-        pill.textContent = '☁️ เชื่อมต่อ Firebase Firestore แล้ว';
+        pill.textContent = `☁️ ออนไลน์ (${firebaseConfig.projectId})`;
         pill.style.borderColor = 'rgba(16, 185, 129, 0.5)';
         pill.style.color = '#34d399';
       }
       return;
     } catch (err) {
       console.error('Firebase connection error:', err);
-      showToast('ไม่สามารถเชื่อมต่อ Firebase ได้ (ตรวจสอบ JSON Config): ใช้ฐานข้อมูลสำรองในระบบแทน', 'warning');
+      showToast('⚠️ การเชื่อมต่อ Firebase ขัดข้อง: ' + (err.message || err), 'warning');
     }
   }
 
@@ -602,12 +695,18 @@ async function initCloudConnection() {
 }
 
 async function saveProductToCloud(product) {
-  if (state.settings.cloudProvider === 'firebase' && state.firestoreDb && state.firebaseModules) {
-    try {
-      const { doc, setDoc } = state.firebaseModules;
-      await setDoc(doc(state.firestoreDb, 'takeit_products', product.id), product);
-    } catch (err) {
-      console.error('Firestore save product error:', err);
+  if (state.settings.cloudProvider === 'firebase') {
+    if (!state.firestoreDb || !state.firebaseModules) {
+      await initCloudConnection();
+    }
+    if (state.firestoreDb && state.firebaseModules) {
+      try {
+        const { doc, setDoc } = state.firebaseModules;
+        await setDoc(doc(state.firestoreDb, 'takeit_products', product.id), product);
+      } catch (err) {
+        console.error('Firestore save product error:', err);
+        showToast('⚠️ ไม่สามารถซิงค์สินค้าขึ้น Firebase ได้ (รูปภาพอาจมีขนาดรวมใหญ่เกิน 1MB): ' + (err.message || ''), 'error');
+      }
     }
   } else if (state.settings.cloudProvider === 'supabase' && state.settings.supabaseUrl && state.settings.supabaseKey) {
     await syncSupabaseKeyValue('products', state.products);
@@ -615,12 +714,17 @@ async function saveProductToCloud(product) {
 }
 
 async function deleteProductFromCloud(productId) {
-  if (state.settings.cloudProvider === 'firebase' && state.firestoreDb && state.firebaseModules) {
-    try {
-      const { doc, deleteDoc } = state.firebaseModules;
-      await deleteDoc(doc(state.firestoreDb, 'takeit_products', productId));
-    } catch (err) {
-      console.error('Firestore delete product error:', err);
+  if (state.settings.cloudProvider === 'firebase') {
+    if (!state.firestoreDb || !state.firebaseModules) {
+      await initCloudConnection();
+    }
+    if (state.firestoreDb && state.firebaseModules) {
+      try {
+        const { doc, deleteDoc } = state.firebaseModules;
+        await deleteDoc(doc(state.firestoreDb, 'takeit_products', productId));
+      } catch (err) {
+        console.error('Firestore delete product error:', err);
+      }
     }
   } else if (state.settings.cloudProvider === 'supabase' && state.settings.supabaseUrl && state.settings.supabaseKey) {
     await syncSupabaseKeyValue('products', state.products);
@@ -2065,7 +2169,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (files.length === 0) return;
     try {
       for (const file of files) {
-        const compressed = await compressImageFileToDataUrl(file, 720, 0.8);
+        const compressed = await compressImageFileToDataUrl(file, 560, 0.72);
         state.editingProductImages.push(compressed);
       }
       e.target.value = '';
@@ -2113,8 +2217,10 @@ document.addEventListener('DOMContentLoaded', () => {
       ? [...state.editingProductImages]
       : [makeProductBannerSvg(name, `${platform} • TakeIT`, '#1e3a8a', '#4c1d95', category === 'console' ? '🕹️' : '💿')];
 
+    const nowMs = Date.now();
+    const existingProd = existingId ? state.products.find((p) => p.id === existingId) : null;
     const prodObj = {
-      id: existingId || 'PROD-' + Date.now(),
+      id: existingId || 'PROD-' + nowMs,
       name,
       category,
       platform,
@@ -2126,7 +2232,10 @@ document.addEventListener('DOMContentLoaded', () => {
       rentDeposit,
       description,
       image: finalImages[0],
-      images: finalImages
+      images: finalImages,
+      isCustom: true,
+      createdAtMs: existingProd?.createdAtMs || nowMs,
+      updatedAtMs: nowMs
     };
 
     if (existingId) {
