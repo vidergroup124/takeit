@@ -69,8 +69,9 @@ dialog {
   padding: 0;
   max-inline-size: min(760px, 94vw);
   inline-size: calc(100vw - 1.25rem);
-  block-size: fit-content;
-  max-block-size: 86dvh;
+  block-size: auto;
+  max-block-size: 85vh;
+  max-block-size: 85dvh;
   margin: auto;
   overflow-x: hidden;
   overflow-y: auto;
