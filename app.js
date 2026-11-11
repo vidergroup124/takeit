@@ -474,7 +474,7 @@ async function loadInitialData() {
       if (!parsed.qrImageUrl) {
         parsed.qrImageUrl = DEFAULT_SETTINGS.qrImageUrl;
       }
-      if (!parsed.sheetWebhookUrl) {
+      if (!parsed.sheetWebhookUrl || !String(parsed.sheetWebhookUrl).includes('script.google.com/macros/s/')) {
         parsed.sheetWebhookUrl = DEFAULT_SETTINGS.sheetWebhookUrl;
       }
       // Upgrade any device that was previously on 'local' mode to 'firebase' (takeit-ebb5e) so all devices sync together
@@ -487,7 +487,9 @@ async function loadInitialData() {
       state.settings = {
         ...DEFAULT_SETTINGS,
         ...parsed,
-        sheetWebhookUrl: parsed.sheetWebhookUrl || DEFAULT_SETTINGS.sheetWebhookUrl,
+        sheetWebhookUrl: (parsed.sheetWebhookUrl && String(parsed.sheetWebhookUrl).includes('script.google.com/macros/s/'))
+          ? parsed.sheetWebhookUrl
+          : DEFAULT_SETTINGS.sheetWebhookUrl,
         cloudProvider: parsed.cloudProvider || 'firebase',
         firebaseConfigJson: parsed.firebaseConfigJson || DEFAULT_SETTINGS.firebaseConfigJson
       };
@@ -543,6 +545,11 @@ async function loadInitialData() {
 
   saveStateLocally();
   renderAll();
+
+  // 4. Automatically push any existing orders to Google Sheets in the background so no order is ever missed
+  if (state.orders.length > 0) {
+    autoSyncOrdersToGoogleSheetSilent();
+  }
 }
 
 function saveStateLocally() {
@@ -605,13 +612,25 @@ async function initCloudConnection() {
         await pushAllToCloud();
       }
 
-      // 2. Initial fetch of orders from Firestore
+      // 2. Initial fetch & merge of orders from Firestore
       const orderSnap = await fsMod.getDocs(fsMod.collection(db, 'takeit_orders'));
+      const orderMap = new Map();
       if (!orderSnap.empty) {
-        const cloudOrders = [];
-        orderSnap.forEach((docSnap) => cloudOrders.push(docSnap.data()));
-        cloudOrders.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-        state.orders = cloudOrders;
+        orderSnap.forEach((docSnap) => {
+          const d = docSnap.data();
+          if (d && d.id) orderMap.set(d.id, d);
+        });
+      }
+      for (const localOrd of state.orders) {
+        if (localOrd && localOrd.id && !orderMap.has(localOrd.id)) {
+          orderMap.set(localOrd.id, localOrd);
+          fsMod.setDoc(fsMod.doc(db, 'takeit_orders', localOrd.id), localOrd).catch(() => {});
+        }
+      }
+      if (orderMap.size > 0) {
+        const mergedOrders = Array.from(orderMap.values());
+        mergedOrders.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        state.orders = mergedOrders;
       }
 
       // 3. Real-time listeners so any product or order added on one device appears on all other devices automatically
@@ -732,12 +751,17 @@ async function deleteProductFromCloud(productId) {
 }
 
 async function saveOrderToCloud(order) {
-  if (state.settings.cloudProvider === 'firebase' && state.firestoreDb && state.firebaseModules) {
-    try {
-      const { doc, setDoc } = state.firebaseModules;
-      await setDoc(doc(state.firestoreDb, 'takeit_orders', order.id), order);
-    } catch (err) {
-      console.error('Firestore save order error:', err);
+  if (state.settings.cloudProvider === 'firebase') {
+    if (!state.firestoreDb || !state.firebaseModules) {
+      await initCloudConnection();
+    }
+    if (state.firestoreDb && state.firebaseModules) {
+      try {
+        const { doc, setDoc } = state.firebaseModules;
+        await setDoc(doc(state.firestoreDb, 'takeit_orders', order.id), order);
+      } catch (err) {
+        console.error('Firestore save order error:', err);
+      }
     }
   } else if (state.settings.cloudProvider === 'supabase' && state.settings.supabaseUrl && state.settings.supabaseKey) {
     await syncSupabaseKeyValue('orders', state.orders);
@@ -785,61 +809,147 @@ async function syncSupabaseKeyValue(key, value) {
 // ============================================================================
 // Google Sheets Integration (Webhook + CSV/Excel Export)
 // ============================================================================
+function getValidSheetWebhookUrl() {
+  const raw = (state.settings.sheetWebhookUrl || '').trim();
+  if (raw && raw.includes('script.google.com/macros/s/')) {
+    return raw;
+  }
+  return DEFAULT_SETTINGS.sheetWebhookUrl;
+}
+
+function buildSheetOrderPayload(order) {
+  return {
+    id: order.id || '',
+    createdAt: order.createdAt || '',
+    createdAtFormatted: order.createdAtFormatted || order.createdAt || new Date().toLocaleString('th-TH'),
+    orderTypeLabel: order.orderTypeLabel || 'ซื้อ/เช่าสินค้า',
+    customer: {
+      name: order.customer?.name || '',
+      phone: order.customer?.phone || '',
+      lineId: order.customer?.lineId || '-',
+      address: order.customer?.address || '',
+      note: order.customer?.note || '-'
+    },
+    // Strip large base64 product images from items so the webhook payload stays tiny (< 1KB)
+    items: (order.items || []).map((item) => ({
+      productId: item.productId || '',
+      name: item.name || '',
+      platform: item.platform || '',
+      mode: item.mode || 'buy',
+      qty: Number(item.qty || 1),
+      price: Number(item.price || 0),
+      rentDays: Number(item.rentDays || 0),
+      rentRate: Number(item.rentRate || 0),
+      deposit: Number(item.deposit || 0),
+      rentStartDate: item.rentStartDate || '',
+      rentEndDate: item.rentEndDate || ''
+    })),
+    buySubtotal: Number(order.buySubtotal || 0),
+    rentSubtotal: Number(order.rentSubtotal || 0),
+    depositSubtotal: Number(order.depositSubtotal || 0),
+    shippingFee: Number(order.shippingFee || 0),
+    grandTotal: Number(order.grandTotal || 0),
+    status: order.status || 'รอตรวจสอบสลิป',
+    statusLabel: order.statusLabel || order.status || 'รอตรวจสอบสลิป',
+    slipNote: order.slipNote || (order.slipDataUrl ? 'แนบสลิปโอนเงินแล้ว (เปิดดูรูปได้ในหน้า Admin)' : 'ไม่มีรูปสลิป')
+  };
+}
+
+async function postPayloadToGoogleSheet(webhookUrl, payloadObj) {
+  const bodyStr = JSON.stringify(payloadObj);
+
+  // 1. Try standard CORS POST first so we can inspect the JSON response from Apps Script
+  try {
+    const res = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: bodyStr,
+      redirect: 'follow'
+    });
+    if (res.ok) {
+      const text = await res.text();
+      try {
+        const json = JSON.parse(text);
+        if (json && json.status === 'error') {
+          console.error('Google Apps Script returned error:', json.message);
+          if (state.isAdmin) {
+            showToast('⚠️ Google Sheets แจ้งว่า: ' + json.message, 'warning');
+          }
+          return false;
+        }
+        return true;
+      } catch (parseErr) {
+        // If response is HTML (e.g. login page when "Who has access" is not set to "Anyone")
+        if (text.includes('accounts.google.com') || text.includes('ServiceLogin')) {
+          if (state.isAdmin) {
+            showToast('⚠️ กรุณาตั้งค่า Apps Script > Deploy > Who has access เป็น "Anyone (ทุกคน)"', 'warning');
+          }
+          return false;
+        }
+        return true;
+      }
+    }
+  } catch (corsErr) {
+    // 2. Fallback for strict mobile in-app browsers: fire no-cors POST + GET query param fallback
+    try {
+      await fetch(webhookUrl, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: bodyStr
+      });
+      if (bodyStr.length < 1800) {
+        const sep = webhookUrl.includes('?') ? '&' : '?';
+        fetch(`${webhookUrl}${sep}payload=${encodeURIComponent(bodyStr)}`, {
+          method: 'GET',
+          mode: 'no-cors'
+        }).catch(() => {});
+      }
+      return true;
+    } catch (fallbackErr) {
+      console.error('Google Sheets Webhook error:', fallbackErr);
+      return false;
+    }
+  }
+  return false;
+}
+
 async function sendOrderToGoogleSheet(order, action = 'create_order') {
-  const webhookUrl = (state.settings.sheetWebhookUrl || '').trim();
+  const webhookUrl = getValidSheetWebhookUrl();
   if (!webhookUrl) return false;
 
-  // Avoid sending massive base64 image string to Sheet cell (keep a clean note instead)
-  const cleanOrder = {
-    ...order,
-    slipDataUrl: undefined,
-    slipNote: order.slipDataUrl ? 'แนบสลิปโอนเงินแล้ว (เปิดดูรูปได้ในหน้า Admin)' : 'ไม่มีรูปสลิป'
-  };
+  const cleanOrder = buildSheetOrderPayload(order);
+  return postPayloadToGoogleSheet(webhookUrl, {
+    action,
+    order: cleanOrder
+  });
+}
 
-  try {
-    await fetch(webhookUrl, {
-      method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({
-        action,
-        order: cleanOrder
-      })
-    });
-    return true;
-  } catch (err) {
-    console.error('Google Sheets Webhook error:', err);
-    return false;
-  }
+async function autoSyncOrdersToGoogleSheetSilent() {
+  const webhookUrl = getValidSheetWebhookUrl();
+  if (!webhookUrl || !state.orders.length) return;
+  const cleanOrders = state.orders.map(buildSheetOrderPayload);
+  await postPayloadToGoogleSheet(webhookUrl, {
+    action: 'sync_all_orders',
+    orders: cleanOrders
+  });
 }
 
 async function syncAllOrdersToGoogleSheet() {
-  const webhookUrl = (state.settings.sheetWebhookUrl || '').trim();
+  const webhookUrl = getValidSheetWebhookUrl();
   if (!webhookUrl) {
     showToast('⚠️ กรุณาใส่ Google Apps Script Web App URL ในแท็บตั้งค่าก่อนครับ', 'warning');
     switchAdminTab('settings');
     return;
   }
 
-  const cleanOrders = state.orders.map((o) => ({
-    ...o,
-    slipDataUrl: undefined,
-    slipNote: o.slipDataUrl ? 'แนบสลิปโอนเงินแล้ว (เปิดดูรูปได้ในหน้า Admin)' : 'ไม่มีรูปสลิป'
-  }));
-
-  try {
-    await fetch(webhookUrl, {
-      method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({
-        action: 'sync_all_orders',
-        orders: cleanOrders
-      })
-    });
+  const cleanOrders = state.orders.map(buildSheetOrderPayload);
+  const ok = await postPayloadToGoogleSheet(webhookUrl, {
+    action: 'sync_all_orders',
+    orders: cleanOrders
+  });
+  if (ok) {
     showToast(`📊 ส่งข้อมูลคำสั่งซื้อทั้งหมด (${cleanOrders.length} รายการ) เข้า Google Sheets เรียบร้อยแล้ว!`);
-  } catch (err) {
-    showToast('❌ เกิดข้อผิดพลาดในการส่งข้อมูลไป Google Sheets', 'error');
   }
 }
 
@@ -913,6 +1023,29 @@ function exportOrdersToCsvSheet() {
   URL.revokeObjectURL(url);
 
   showToast('📊 ดาวน์โหลดไฟล์ตารางคำสั่งซื้อ (.CSV สำหรับเปิดใน Excel / Google Sheets) เรียบร้อยแล้ว!');
+}
+
+// Privacy & Masking Helpers (PDPA Compliance for Public Order Lookup)
+function maskCustomerName(name) {
+  if (!name || !String(name).trim()) return '***';
+  const parts = String(name).trim().split(/\s+/);
+  return parts.map((part) => {
+    if (part.length <= 2) return part[0] + '*';
+    if (part.length <= 4) return part[0] + '**' + part.slice(-1);
+    return part.slice(0, 2) + '***' + part.slice(-1);
+  }).join(' ');
+}
+
+function maskPhone(phone) {
+  if (!phone) return '***';
+  const clean = String(phone).replace(/\D/g, '');
+  if (clean.length === 10) {
+    return clean.slice(0, 3) + '-xxx-x' + clean.slice(-3);
+  }
+  if (clean.length >= 7) {
+    return clean.slice(0, 3) + '-***-' + clean.slice(-2);
+  }
+  return clean.slice(0, 2) + '***';
 }
 
 // ============================================================================
@@ -2086,17 +2219,41 @@ document.addEventListener('DOMContentLoaded', () => {
   // Order Lookup Modal
   document.getElementById('btn-check-order')?.addEventListener('click', () => {
     const dlg = document.getElementById('dialog-order-lookup');
-    renderOrderLookupList(state.orders.slice(0, 5));
+    const input = document.getElementById('order-lookup-input');
+    if (input) input.value = '';
+    const container = document.getElementById('order-lookup-results');
+    if (container) {
+      container.innerHTML = `
+        <div style="text-align:center; padding:2.2rem 1rem; color:var(--text-secondary); background:rgba(15,23,42,0.5); border-radius:var(--radius-md); border:1px dashed var(--border-subtle);">
+          <div style="font-size:2.4rem; margin-block-end:0.6rem;">🔍</div>
+          <h4 style="margin:0 0 0.35rem; color:var(--accent-cyan);">ค้นหาสถานะคำสั่งซื้อของคุณ</h4>
+          <p style="margin:0; font-size:0.88rem; color:var(--text-muted); max-inline-size:380px; margin-inline:auto;">
+            กรุณากรอก <strong>รหัสคำสั่งซื้อ (Order ID)</strong> หรือ <strong>เบอร์โทรศัพท์</strong> ในช่องด้านบน แล้วกดค้นหาเพื่อตรวจสอบสถานะการจัดส่ง
+          </p>
+        </div>
+      `;
+    }
     dlg.showModal();
   });
 
   document.getElementById('order-lookup-form')?.addEventListener('submit', (e) => {
     e.preventDefault();
-    const q = document.getElementById('order-lookup-input').value.trim().toLowerCase();
-    const matches = state.orders.filter((o) =>
-      o.id.toLowerCase().includes(q) || (o.customer?.phone || '').toLowerCase().includes(q)
-    );
-    renderOrderLookupList(matches);
+    const rawQ = document.getElementById('order-lookup-input').value.trim();
+    if (!rawQ || rawQ.length < 3) {
+      showToast('กรุณากรอกรหัสออเดอร์หรือเบอร์โทรศัพท์อย่างน้อย 3 ตัวอักษร', 'warning');
+      return;
+    }
+    const qLower = rawQ.toLowerCase();
+    const qDigits = rawQ.replace(/\D/g, '');
+
+    const matches = state.orders.filter((o) => {
+      const idMatch = o.id && o.id.toLowerCase().includes(qLower);
+      const phoneDigits = (o.customer?.phone || '').replace(/\D/g, '');
+      const phoneMatch = qDigits.length >= 3 && phoneDigits.includes(qDigits);
+      return idMatch || phoneMatch;
+    });
+
+    renderOrderLookupList(matches, false, false, rawQ);
   });
 
   // Admin Login & Logout
@@ -2387,12 +2544,18 @@ function showOrderReceiptModal(order, sentToSheet) {
   dlg.showModal();
 }
 
-function renderOrderLookupList(orders, isNewOrder = false, sentToSheet = false) {
+function renderOrderLookupList(orders, isNewOrder = false, sentToSheet = false, searchQuery = '') {
   const container = document.getElementById('order-lookup-results');
   if (!container) return;
 
   if (!orders || orders.length === 0) {
-    container.innerHTML = `<p style="color:var(--text-muted); text-align:center;">ไม่พบข้อมูลคำสั่งซื้อที่ค้นหา</p>`;
+    container.innerHTML = `
+      <div style="text-align:center; padding:2rem 1rem; color:var(--text-muted); background:rgba(15,23,42,0.4); border-radius:var(--radius-md); border:1px solid var(--border-subtle);">
+        <div style="font-size:2rem; margin-block-end:0.4rem;">❓</div>
+        <strong style="display:block; color:var(--text-secondary); margin-block-end:0.25rem;">ไม่พบข้อมูลคำสั่งซื้อที่ค้นหา "${escapeXml(searchQuery)}"</strong>
+        <p style="margin:0; font-size:0.84rem;">โปรดตรวจสอบรหัสคำสั่งซื้อ (เช่น TK-26...) หรือเบอร์โทรศัพท์ แล้วลองใหม่อีกครั้งครับ</p>
+      </div>
+    `;
     return;
   }
 
@@ -2409,6 +2572,10 @@ function renderOrderLookupList(orders, isNewOrder = false, sentToSheet = false) 
     : '';
 
   container.innerHTML = bannerHtml + orders.map((o) => {
+    // Mask customer privacy data (PDPA Compliance)
+    const maskedName = maskCustomerName(o.customer?.name);
+    const maskedPhone = maskPhone(o.customer?.phone);
+
     const itemsList = (o.items || []).map((item) => {
       if (item.mode === 'rent') {
         return `<li>[เช่าแผ่น ${item.rentDays} วัน] <strong>${escapeXml(item.name)}</strong> (${escapeXml(item.platform)}) x${item.qty} — ค่าเช่า ${formatTHB(item.rentRate * item.rentDays * item.qty)} + มัดจำแผ่น ${formatTHB(item.deposit * item.qty)} (คืนแผ่นวันที่ ${formatThaiDate(item.rentEndDate)})</li>`;
@@ -2423,7 +2590,7 @@ function renderOrderLookupList(orders, isNewOrder = false, sentToSheet = false) 
           <span class="badge badge-emerald">${escapeXml(o.status || 'รอตรวจสอบสลิป')}</span>
         </div>
         <div style="font-size:0.85rem; color:var(--text-secondary); margin-block-end:0.5rem;">
-          ผู้รับ: <strong>${escapeXml(o.customer?.name)}</strong> (${escapeXml(o.customer?.phone)}) | วันที่สั่ง: ${escapeXml(o.createdAtFormatted)}
+          ผู้รับ: <strong>${escapeXml(maskedName)}</strong> (${escapeXml(maskedPhone)}) • วันที่สั่ง: ${escapeXml(o.createdAtFormatted)}
         </div>
         <ul style="margin:0 0 0.65rem; padding-inline-start:1.2rem; font-size:0.85rem;">
           ${itemsList}
