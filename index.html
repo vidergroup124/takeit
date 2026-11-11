@@ -26,7 +26,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Prompt:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20261111-fix7">
+  <link rel="stylesheet" href="styles.css?v=20261111-gmail1">
   <style>
     /* Force override any cached mobile CSS so modal dialogs never collapse on iOS / Instagram browser */
     dialog[open] {
@@ -63,8 +63,15 @@
           ⚡ โหมดฐานข้อมูลพร้อมใช้งาน
         </span>
         <span id="user-role-badge" class="guest-badge">
-          👤 โหมดลูกค้า: Guest (สั่งซื้อ/เช่าได้ทันที)
+          👤 โหมดลูกค้า: ทั่วไป (สั่งซื้อได้ทันที)
         </span>
+
+        <div id="customer-auth-wrap" style="display:inline-flex; align-items:center;">
+          <button type="button" class="btn btn-outline btn-sm btn-google-auth" id="btn-customer-login" title="เข้าสู่ระบบด้วย Gmail เพื่อดูประวัติออเดอร์และกรอกข้อมูลง่ายขึ้น">
+            <svg width="15" height="15" viewBox="0 0 24 24" style="vertical-align:middle; margin-inline-end:3px;"><path fill="#EA4335" d="M12 5c1.6 0 3 .6 4.1 1.7l3.1-3.1C17.3 1.8 14.8 1 12 1 7.4 1 3.5 3.6 1.6 7.3l3.7 2.9C6.2 7.4 8.9 5 12 5z"/><path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.7-.2-2.3H12v4.6h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.2-2 3.7-5 3.7-8.9z"/><path fill="#FBBC05" d="M5.3 14.8c-.2-.7-.4-1.5-.4-2.3 0-.8.2-1.6.4-2.3L1.6 7.3C.6 9.3 0 10.6 0 12s.6 2.7 1.6 4.7l3.7-1.9z"/><path fill="#34A853" d="M12 23c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3.1 0-5.8-2.4-6.7-5.2L1.6 16c1.9 3.7 5.8 7 10.4 7z"/></svg>
+            เข้าสู่ระบบด้วย Gmail
+          </button>
+        </div>
 
         <button type="button" class="btn btn-outline btn-sm" id="btn-check-order">
           📦 เช็คสถานะคำสั่งซื้อ
@@ -943,7 +950,7 @@
   <!-- Toast Container -->
   <div id="toast-container" class="toast-container" aria-live="polite"></div>
 
-  <script src="app.js?v=20261111-fix7" defer></script>
+  <script src="app.js?v=20261111-gmail1" defer></script>
 </body>
 </html>
 

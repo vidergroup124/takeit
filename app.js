@@ -58,9 +58,13 @@ const DEFAULT_SETTINGS = {
   shippingFee: 60,
   cloudProvider: 'firebase', // Default to Firebase Cloud so all devices see the same products automatically
   firebaseConfigJson: JSON.stringify({
-    projectId: 'takeit-ebb5e',
-    authDomain: 'takeit-ebb5e.firebaseapp.com',
-    storageBucket: 'takeit-ebb5e.appspot.com'
+    apiKey: "AIzaSyDUAxkwmUt6WPUTj294qhPeGwpHOp3772A",
+    authDomain: "takeit-ebb5e.firebaseapp.com",
+    projectId: "takeit-ebb5e",
+    storageBucket: "takeit-ebb5e.firebasestorage.app",
+    messagingSenderId: "331086308576",
+    appId: "1:331086308576:web:5a54810f2cbbf96bcd5c85",
+    measurementId: "G-KP2GB6TJM2"
   }),
   supabaseUrl: '',
   supabaseKey: ''
@@ -68,9 +72,13 @@ const DEFAULT_SETTINGS = {
 
 function parseFirebaseConfig(rawInput) {
   const fallbackConfig = {
-    projectId: 'takeit-ebb5e',
-    authDomain: 'takeit-ebb5e.firebaseapp.com',
-    storageBucket: 'takeit-ebb5e.appspot.com'
+    apiKey: "AIzaSyDUAxkwmUt6WPUTj294qhPeGwpHOp3772A",
+    authDomain: "takeit-ebb5e.firebaseapp.com",
+    projectId: "takeit-ebb5e",
+    storageBucket: "takeit-ebb5e.firebasestorage.app",
+    messagingSenderId: "331086308576",
+    appId: "1:331086308576:web:5a54810f2cbbf96bcd5c85",
+    measurementId: "G-KP2GB6TJM2"
   };
   if (!rawInput || !String(rawInput).trim()) {
     return fallbackConfig;
@@ -309,7 +317,10 @@ let state = {
   pendingSlipDataUrl: '',
   editingProductImages: [],
   firestoreDb: null,
-  firebaseModules: null
+  firebaseModules: null,
+  auth: null,
+  authModules: null,
+  currentUser: null
 };
 
 function getProductImages(p) {
@@ -481,7 +492,7 @@ async function loadInitialData() {
       if (!parsed.cloudProvider || parsed.cloudProvider === 'local') {
         parsed.cloudProvider = 'firebase';
       }
-      if (!parsed.firebaseConfigJson) {
+      if (!parsed.firebaseConfigJson || !parsed.firebaseConfigJson.includes('AIzaSyDUAxkwmUt6WPUTj294qhPeGwpHOp3772A')) {
         parsed.firebaseConfigJson = DEFAULT_SETTINGS.firebaseConfigJson;
       }
       state.settings = {
@@ -582,14 +593,36 @@ async function initCloudConnection() {
     try {
       const firebaseConfig = parseFirebaseConfig(state.settings.firebaseConfigJson);
 
-      // Dynamically load Modular Firebase SDK v10
+      // Dynamically load Modular Firebase SDK v10 (App, Firestore, Auth)
       const appMod = await import('https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js');
       const fsMod = await import('https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js');
+      const authMod = await import('https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js');
 
       const app = appMod.getApps().length ? appMod.getApp() : appMod.initializeApp(firebaseConfig);
       const db = fsMod.getFirestore(app);
       state.firestoreDb = db;
       state.firebaseModules = fsMod;
+
+      const auth = authMod.getAuth(app);
+      state.auth = auth;
+      state.authModules = authMod;
+
+      if (!state.authListenerAttached) {
+        state.authListenerAttached = true;
+        authMod.onAuthStateChanged(auth, (user) => {
+          if (user) {
+            state.currentUser = {
+              uid: user.uid,
+              email: user.email || '',
+              displayName: user.displayName || (user.email ? user.email.split('@')[0] : 'ลูกค้า'),
+              photoURL: user.photoURL || ''
+            };
+          } else {
+            state.currentUser = null;
+          }
+          renderCustomerAuthUI();
+        });
+      }
 
       // 1. Initial fetch of products from Firestore
       const prodSnap = await fsMod.getDocs(fsMod.collection(db, 'takeit_products'));
@@ -1100,12 +1133,101 @@ function compressImageFileToDataUrl(file, maxWidth = 800, quality = 0.78) {
 }
 
 // ============================================================================
+// Customer Google Authentication (Gmail Sign-in)
+// ============================================================================
+function renderCustomerAuthUI() {
+  const wrap = document.getElementById('customer-auth-wrap');
+  const roleBadge = document.getElementById('user-role-badge');
+  if (!wrap) return;
+
+  if (state.currentUser) {
+    if (roleBadge) {
+      roleBadge.className = 'guest-badge';
+      roleBadge.style.background = 'rgba(56, 189, 248, 0.15)';
+      roleBadge.style.borderColor = 'rgba(56, 189, 248, 0.4)';
+      roleBadge.style.color = '#38bdf8';
+      roleBadge.innerHTML = `👤 ${escapeXml(state.currentUser.displayName)}`;
+      roleBadge.title = `เข้าสู่ระบบด้วย Gmail: ${state.currentUser.email}`;
+    }
+
+    wrap.innerHTML = `
+      <div class="customer-profile-pill">
+        ${state.currentUser.photoURL ? `<img src="${state.currentUser.photoURL}" alt="${escapeXml(state.currentUser.displayName)}" class="cust-avatar">` : '<span>👤</span>'}
+        <span class="cust-name">${escapeXml(state.currentUser.displayName)}</span>
+        <button type="button" class="btn-cust-logout" id="btn-customer-logout" title="ออกจากระบบ Google (Gmail)" aria-label="ออกจากระบบ Google">✕</button>
+      </div>
+    `;
+
+    document.getElementById('btn-customer-logout')?.addEventListener('click', logoutCustomer);
+  } else {
+    if (roleBadge) {
+      roleBadge.className = 'guest-badge';
+      roleBadge.style.background = 'rgba(16, 185, 129, 0.12)';
+      roleBadge.style.borderColor = 'rgba(16, 185, 129, 0.35)';
+      roleBadge.style.color = '#34d399';
+      roleBadge.textContent = '👤 โหมดลูกค้า: ทั่วไป (สั่งซื้อได้ทันที)';
+      roleBadge.title = 'ลูกค้าทั่วไป (Guest)';
+    }
+
+    wrap.innerHTML = `
+      <button type="button" class="btn btn-outline btn-sm btn-google-auth" id="btn-customer-login" title="เข้าสู่ระบบด้วย Gmail เพื่อดูประวัติคำสั่งซื้อส่วนตัว">
+        <svg width="15" height="15" viewBox="0 0 24 24" style="vertical-align:middle; margin-inline-end:3px;"><path fill="#EA4335" d="M12 5c1.6 0 3 .6 4.1 1.7l3.1-3.1C17.3 1.8 14.8 1 12 1 7.4 1 3.5 3.6 1.6 7.3l3.7 2.9C6.2 7.4 8.9 5 12 5z"/><path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.7-.2-2.3H12v4.6h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.2-2 3.7-5 3.7-8.9z"/><path fill="#FBBC05" d="M5.3 14.8c-.2-.7-.4-1.5-.4-2.3 0-.8.2-1.6.4-2.3L1.6 7.3C.6 9.3 0 10.6 0 12s.6 2.7 1.6 4.7l3.7-1.9z"/><path fill="#34A853" d="M12 23c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3.1 0-5.8-2.4-6.7-5.2L1.6 16c1.9 3.7 5.8 7 10.4 7z"/></svg>
+        เข้าสู่ระบบด้วย Gmail
+      </button>
+    `;
+
+    document.getElementById('btn-customer-login')?.addEventListener('click', loginWithGoogle);
+  }
+}
+
+async function loginWithGoogle() {
+  if (!state.auth || !state.authModules) {
+    await initCloudConnection();
+  }
+  if (!state.auth || !state.authModules) {
+    showToast('⚠️ ระบบล็อกอินกำลังเชื่อมต่อ กรุณารอสักครู่แล้วลองใหม่อีกครั้งครับ', 'warning');
+    return;
+  }
+  try {
+    const { signInWithPopup, GoogleAuthProvider } = state.authModules;
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    const result = await signInWithPopup(state.auth, provider);
+    const u = result.user;
+    showToast(`🎉 ยินดีต้อนรับคุณ ${u.displayName || 'ลูกค้า'} เข้าสู่ร้าน TakeIT!`);
+
+    // Auto-fill checkout fields if open
+    const custName = document.getElementById('cust-name');
+    if (custName && !custName.value.trim()) custName.value = u.displayName || '';
+  } catch (err) {
+    console.error('Google Sign-In error:', err);
+    if (err.code === 'auth/unauthorized-domain') {
+      showToast('⚠️ โดเมนยังไม่ได้รับอนุญาตใน Firebase Console กรุณาเพิ่ม vidergroup124.github.io ในเมนู Authentication > Settings > Authorized domains ครับ', 'error');
+    } else if (err.code !== 'auth/popup-closed-by-user' && err.code !== 'auth/cancelled-popup-request') {
+      showToast('⚠️ เข้าสู่ระบบไม่สำเร็จ: ' + (err.message || err.code), 'error');
+    }
+  }
+}
+
+async function logoutCustomer() {
+  if (state.auth && state.authModules) {
+    try {
+      await state.authModules.signOut(state.auth);
+      showToast('ออกจากระบบ Google เรียบร้อยแล้ว');
+    } catch (err) {
+      console.error('Logout error:', err);
+    }
+  }
+}
+
+// ============================================================================
 // UI Rendering: Storefront, Cart, and Admin Tables
 // ============================================================================
 function renderAll() {
   renderStorefront();
   renderCartBadge();
   renderAdminVisibility();
+  renderCustomerAuthUI();
   if (state.isAdmin) {
     renderAdminStats();
     renderAdminOrdersTable();
@@ -1600,6 +1722,10 @@ function calculateCartTotals() {
 function openCartModal() {
   const dialog = document.getElementById('dialog-cart');
   renderCartModalContents();
+  const nameInput = document.getElementById('cust-name');
+  if (nameInput && !nameInput.value.trim() && state.currentUser?.displayName) {
+    nameInput.value = state.currentUser.displayName;
+  }
   dialog.showModal();
 }
 
@@ -2175,8 +2301,12 @@ document.addEventListener('DOMContentLoaded', () => {
         phone: document.getElementById('cust-phone').value.trim(),
         lineId: document.getElementById('cust-line').value.trim(),
         address: document.getElementById('cust-address').value.trim(),
-        note: document.getElementById('cust-note').value.trim()
+        note: document.getElementById('cust-note').value.trim(),
+        email: state.currentUser?.email || '',
+        uid: state.currentUser?.uid || ''
       },
+      customerUid: state.currentUser?.uid || '',
+      customerEmail: state.currentUser?.email || '',
       items: [...state.cart],
       buySubtotal: totals.buySubtotal,
       rentSubtotal: totals.rentSubtotal,
@@ -2222,16 +2352,48 @@ document.addEventListener('DOMContentLoaded', () => {
     const input = document.getElementById('order-lookup-input');
     if (input) input.value = '';
     const container = document.getElementById('order-lookup-results');
-    if (container) {
+    if (!container) return;
+
+    if (state.currentUser) {
+      // Find orders belonging to the logged-in user
+      const myOrders = state.orders.filter((o) =>
+        (o.customerUid && o.customerUid === state.currentUser.uid) ||
+        (o.customerEmail && o.customerEmail.toLowerCase() === state.currentUser.email.toLowerCase())
+      );
+
+      if (myOrders.length > 0) {
+        renderOrderLookupList(myOrders, false, false, '', true);
+      } else {
+        container.innerHTML = `
+          <div style="text-align:center; padding:2rem 1rem; color:var(--text-secondary); background:rgba(15,23,42,0.5); border-radius:var(--radius-md); border:1px dashed var(--border-subtle);">
+            <div style="font-size:2.2rem; margin-block-end:0.5rem;">🎮</div>
+            <h4 style="margin:0 0 0.35rem; color:#34d399;">ยินดีต้อนรับคุณ ${escapeXml(state.currentUser.displayName)}</h4>
+            <p style="margin:0 0 1rem; font-size:0.88rem; color:var(--text-muted);">
+              ยังไม่พบประวัติการสั่งซื้อด้วยบัญชี (${escapeXml(state.currentUser.email)})
+            </p>
+            <p style="margin:0; font-size:0.84rem; color:var(--text-secondary);">
+              หากคุณเคยสั่งซื้อในโหมดทั่วไป สามารถพิมพ์ <strong>รหัสคำสั่งซื้อ (TK-...)</strong> หรือ <strong>เบอร์โทรศัพท์</strong> ในช่องด้านบนเพื่อค้นหาได้ครับ
+            </p>
+          </div>
+        `;
+      }
+    } else {
       container.innerHTML = `
-        <div style="text-align:center; padding:2.2rem 1rem; color:var(--text-secondary); background:rgba(15,23,42,0.5); border-radius:var(--radius-md); border:1px dashed var(--border-subtle);">
+        <div style="text-align:center; padding:2rem 1rem; color:var(--text-secondary); background:rgba(15,23,42,0.5); border-radius:var(--radius-md); border:1px dashed var(--border-subtle);">
           <div style="font-size:2.4rem; margin-block-end:0.6rem;">🔍</div>
           <h4 style="margin:0 0 0.35rem; color:var(--accent-cyan);">ค้นหาสถานะคำสั่งซื้อของคุณ</h4>
-          <p style="margin:0; font-size:0.88rem; color:var(--text-muted); max-inline-size:380px; margin-inline:auto;">
-            กรุณากรอก <strong>รหัสคำสั่งซื้อ (Order ID)</strong> หรือ <strong>เบอร์โทรศัพท์</strong> ในช่องด้านบน แล้วกดค้นหาเพื่อตรวจสอบสถานะการจัดส่ง
+          <p style="margin:0 0 1rem; font-size:0.88rem; color:var(--text-muted); max-inline-size:380px; margin-inline:auto;">
+            กรุณากรอก <strong>รหัสคำสั่งซื้อ (Order ID)</strong> หรือ <strong>เบอร์โทรศัพท์</strong> ในช่องด้านบน แล้วกดค้นหา
           </p>
+          <div style="border-block-start:1px solid var(--border-subtle); padding-block-start:0.85rem; margin-block-start:0.85rem;">
+            <button type="button" class="btn btn-outline btn-sm btn-google-auth" id="btn-modal-google-login">
+              <svg width="15" height="15" viewBox="0 0 24 24" style="vertical-align:middle; margin-inline-end:3px;"><path fill="#EA4335" d="M12 5c1.6 0 3 .6 4.1 1.7l3.1-3.1C17.3 1.8 14.8 1 12 1 7.4 1 3.5 3.6 1.6 7.3l3.7 2.9C6.2 7.4 8.9 5 12 5z"/><path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.7-.2-2.3H12v4.6h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.2-2 3.7-5 3.7-8.9z"/><path fill="#FBBC05" d="M5.3 14.8c-.2-.7-.4-1.5-.4-2.3 0-.8.2-1.6.4-2.3L1.6 7.3C.6 9.3 0 10.6 0 12s.6 2.7 1.6 4.7l3.7-1.9z"/><path fill="#34A853" d="M12 23c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3.1 0-5.8-2.4-6.7-5.2L1.6 16c1.9 3.7 5.8 7 10.4 7z"/></svg>
+              เข้าสู่ระบบด้วย Gmail เพื่อดูออเดอร์ทั้งหมดของคุณอัตโนมัติ
+            </button>
+          </div>
         </div>
       `;
+      document.getElementById('btn-modal-google-login')?.addEventListener('click', loginWithGoogle);
     }
     dlg.showModal();
   });
@@ -2544,7 +2706,7 @@ function showOrderReceiptModal(order, sentToSheet) {
   dlg.showModal();
 }
 
-function renderOrderLookupList(orders, isNewOrder = false, sentToSheet = false, searchQuery = '') {
+function renderOrderLookupList(orders, isNewOrder = false, sentToSheet = false, searchQuery = '', isMyOrders = false) {
   const container = document.getElementById('order-lookup-results');
   if (!container) return;
 
@@ -2559,6 +2721,18 @@ function renderOrderLookupList(orders, isNewOrder = false, sentToSheet = false, 
     return;
   }
 
+  const myOrdersHeader = isMyOrders
+    ? `
+      <div style="background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.35); padding:0.85rem 1rem; border-radius:var(--radius-sm); margin-block-end:1rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
+        <div>
+          <strong style="color:var(--accent-cyan); display:block;">👋 บัญชี: ${escapeXml(state.currentUser?.displayName || '')} (${escapeXml(state.currentUser?.email || '')})</strong>
+          <span style="font-size:0.82rem; color:var(--text-secondary);">พบประวัติคำสั่งซื้อของคุณทั้งหมด ${orders.length} รายการ</span>
+        </div>
+        <span class="badge badge-cyan">ล็อกอินด้วย Gmail แล้ว</span>
+      </div>
+    `
+    : '';
+
   const bannerHtml = isNewOrder
     ? `
       <div style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.45); padding:1rem; border-radius:var(--radius-sm); margin-block-end:1rem;">
@@ -2571,10 +2745,15 @@ function renderOrderLookupList(orders, isNewOrder = false, sentToSheet = false, 
     `
     : '';
 
-  container.innerHTML = bannerHtml + orders.map((o) => {
-    // Mask customer privacy data (PDPA Compliance)
-    const maskedName = maskCustomerName(o.customer?.name);
-    const maskedPhone = maskPhone(o.customer?.phone);
+  container.innerHTML = myOrdersHeader + bannerHtml + orders.map((o) => {
+    // If the viewer is the logged-in owner of this order, show unmasked name/phone. Otherwise mask for PDPA.
+    const isOwner = isMyOrders || isNewOrder || Boolean(state.currentUser && (
+      (o.customerUid && o.customerUid === state.currentUser.uid) ||
+      (o.customerEmail && state.currentUser.email && o.customerEmail.toLowerCase() === state.currentUser.email.toLowerCase())
+    ));
+
+    const displayName = isOwner ? (o.customer?.name || '-') : maskCustomerName(o.customer?.name);
+    const displayPhone = isOwner ? (o.customer?.phone || '-') : maskPhone(o.customer?.phone);
 
     const itemsList = (o.items || []).map((item) => {
       if (item.mode === 'rent') {

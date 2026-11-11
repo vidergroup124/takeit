@@ -2,73 +2,54 @@
  * ============================================================================
  * TakeIT Store - Google Apps Script สำหรับบันทึกคำสั่งซื้อและเช่าแผ่นเกมลง Google Sheets
  * ============================================================================
- * วิธีติดตั้ง (ใช้เวลาเพียง 1 นาที):
- * 1. เปิด Google Sheets สร้างชีตใหม่ ตั้งชื่อไฟล์เช่น "TakeIT_Orders"
+ * วิธีติดตั้ง / อัปเดต (ใช้เวลาเพียง 1 นาที):
+ * 1. เปิด Google Sheets ของร้าน:
+ *    https://docs.google.com/spreadsheets/d/1Aoz7JwpgkzeaEZJR_nDtht5gvoiMu-0K9qjvl7A40WQ/edit
  * 2. ไปที่เมนู Extensions (ส่วนขยาย) > Apps Script
- * 3. ลบโค้ดเก่าออกทั้งหมด แล้ววางโค้ดไฟล์นี้ลงไปแทนที่ จากนั้นกดปุ่ม Save (รูปแผ่นดิสก์)
+ * 3. ลบโค้ดเก่าออกทั้งหมด แล้ววางโค้ดไฟล์นี้ลงไปแทนที่ จากนั้นกดปุ่ม Save (💾)
  * 4. กดปุ่ม Deploy (ทำให้ใช้งานได้) มุมขวาบน > เลือก New deployment (การทำให้ใช้งานได้รายการใหม่)
- * 5. กดรูปเฟืองตรง Select type เลือกเป็น "Web app" (เว็บแอป)
- * 6. ตั้งค่าดังนี้:
- *    - Description: TakeIT Order Webhook
+ * 5. เลือกชนิดเป็น "Web app" (เว็บแอป) และตั้งค่าดังนี้:
  *    - Execute as: Me (ฉัน)
- *    - Who has access: Anyone (ทุกคน)  <-- สำคัญมาก เพื่อให้หน้าเว็บส่งข้อมูลเข้าชีตได้
- * 7. กด Deploy > กด Authorize access (อนุญาตสิทธิ์) > คัดลอก "Web app URL" (ลงท้ายด้วย /exec)
- * 8. นำ Web app URL ไปวางในหน้า Admin ของเว็บ TakeIT (เมนู "ตั้งค่า Sheet & Cloud")
+ *    - Who has access: Anyone (ทุกคน)  <-- สำคัญมาก! ต้องเลือก Anyone (ทุกคน) เท่านั้น
+ * 6. กด Deploy แล้วคัดลอก Web app URL (ลงท้ายด้วย /exec) มาใส่ในเว็บ TakeIT
  * ============================================================================
  */
 
+const SPREADSHEET_ID = '1Aoz7JwpgkzeaEZJR_nDtht5gvoiMu-0K9qjvl7A40WQ';
 const SHEET_ORDERS = 'Orders';
 const SHEET_PRODUCTS = 'Products';
+
+function getSpreadsheet() {
+  try {
+    const active = SpreadsheetApp.getActiveSpreadsheet();
+    if (active) return active;
+  } catch (err) {}
+  return SpreadsheetApp.openById(SPREADSHEET_ID);
+}
+
+/**
+ * สามารถกดปุ่ม ▶️ Run (เรียกใช้) ฟังก์ชันนี้ในหน้า Apps Script โดยตรง
+ * เพื่อสร้างหัวตารางและจัดความสวยงามในชีตทันที
+ */
+function setupSheetTableNow() {
+  const ss = getSpreadsheet();
+  ensureOrderSheet(ss);
+  ensureProductSheet(ss);
+}
 
 function doPost(e) {
   const lock = LockService.getScriptLock();
   lock.tryLock(10000);
 
   try {
-    const rawData = e.postData ? e.postData.contents : '{}';
+    let rawData = '{}';
+    if (e && e.postData && e.postData.contents) {
+      rawData = e.postData.contents;
+    } else if (e && e.parameter && e.parameter.payload) {
+      rawData = e.parameter.payload;
+    }
     const payload = JSON.parse(rawData);
-    const action = payload.action || 'create_order';
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-
-    if (action === 'test_connection') {
-      ensureOrderSheet(ss);
-      return jsonResponse({
-        status: 'success',
-        message: 'เชื่อมต่อกับ Google Sheets ของร้าน TakeIT สำเร็จแล้ว!'
-      });
-    }
-
-    if (action === 'create_order' || action === 'sync_order') {
-      const sheet = ensureOrderSheet(ss);
-      const order = payload.order || payload;
-      upsertOrderRow(sheet, order);
-      return jsonResponse({
-        status: 'success',
-        orderId: order.id
-      });
-    }
-
-    if (action === 'sync_all_orders' && Array.isArray(payload.orders)) {
-      const sheet = ensureOrderSheet(ss);
-      payload.orders.forEach(function(order) {
-        upsertOrderRow(sheet, order);
-      });
-      return jsonResponse({
-        status: 'success',
-        count: payload.orders.length
-      });
-    }
-
-    if (action === 'sync_products' && Array.isArray(payload.products)) {
-      const productSheet = ensureProductSheet(ss);
-      syncProductsToSheet(productSheet, payload.products);
-      return jsonResponse({
-        status: 'success',
-        count: payload.products.length
-      });
-    }
-
-    return jsonResponse({ status: 'error', message: 'Unknown action: ' + action });
+    return processWebhookPayload(payload);
   } catch (err) {
     return jsonResponse({ status: 'error', message: err.toString() });
   } finally {
@@ -77,38 +58,109 @@ function doPost(e) {
 }
 
 function doGet(e) {
-  const action = (e && e.parameter && e.parameter.action) || 'status';
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const lock = LockService.getScriptLock();
+  lock.tryLock(10000);
 
-  if (action === 'get_products') {
-    const sheet = ensureProductSheet(ss);
-    const rows = sheet.getDataRange().getValues();
-    if (rows.length <= 1) {
-      return jsonResponse({ status: 'success', products: [] });
+  try {
+    if (e && e.parameter && e.parameter.payload) {
+      const payload = JSON.parse(e.parameter.payload);
+      return processWebhookPayload(payload);
     }
-    const products = [];
-    for (let i = 1; i < rows.length; i++) {
-      const jsonCol = rows[i][9];
-      if (jsonCol) {
-        try {
-          products.push(JSON.parse(jsonCol));
-        } catch (err) {}
+
+    const action = (e && e.parameter && e.parameter.action) || 'status';
+    const ss = getSpreadsheet();
+    ensureOrderSheet(ss);
+
+    if (action === 'get_products') {
+      const sheet = ensureProductSheet(ss);
+      const rows = sheet.getDataRange().getValues();
+      if (rows.length <= 1) {
+        return jsonResponse({ status: 'success', products: [] });
       }
+      const products = [];
+      for (let i = 1; i < rows.length; i++) {
+        const jsonCol = rows[i][9];
+        if (jsonCol) {
+          try {
+            products.push(JSON.parse(jsonCol));
+          } catch (err) {}
+        }
+      }
+      return jsonResponse({ status: 'success', products: products });
     }
-    return jsonResponse({ status: 'success', products: products });
+
+    return jsonResponse({
+      status: 'ok',
+      service: 'TakeIT Google Sheets Webhook Ready',
+      sheetName: ss.getName()
+    });
+  } catch (err) {
+    return jsonResponse({ status: 'error', message: err.toString() });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function processWebhookPayload(payload) {
+  const action = payload.action || 'create_order';
+  const ss = getSpreadsheet();
+
+  if (action === 'test_connection') {
+    ensureOrderSheet(ss);
+    return jsonResponse({
+      status: 'success',
+      message: 'เชื่อมต่อกับ Google Sheets ของร้าน TakeIT สำเร็จแล้ว!'
+    });
   }
 
-  return jsonResponse({
-    status: 'ok',
-    service: 'TakeIT Google Sheets Webhook Ready'
-  });
+  if (action === 'create_order' || action === 'sync_order') {
+    const sheet = ensureOrderSheet(ss);
+    const order = payload.order || payload;
+    upsertOrderRow(sheet, order);
+    return jsonResponse({
+      status: 'success',
+      orderId: order.id
+    });
+  }
+
+  if (action === 'sync_all_orders' && Array.isArray(payload.orders)) {
+    const sheet = ensureOrderSheet(ss);
+    payload.orders.forEach(function(order) {
+      upsertOrderRow(sheet, order);
+    });
+    return jsonResponse({
+      status: 'success',
+      count: payload.orders.length
+    });
+  }
+
+  if (action === 'sync_products' && Array.isArray(payload.products)) {
+    const productSheet = ensureProductSheet(ss);
+    syncProductsToSheet(productSheet, payload.products);
+    return jsonResponse({
+      status: 'success',
+      count: payload.products.length
+    });
+  }
+
+  return jsonResponse({ status: 'error', message: 'Unknown action: ' + action });
 }
 
 function ensureOrderSheet(ss) {
   let sheet = ss.getSheetByName(SHEET_ORDERS);
   if (!sheet) {
-    sheet = ss.insertSheet(SHEET_ORDERS);
+    const allSheets = ss.getSheets();
+    // หากแท็บแรกสุด (gid=0 เช่น ชีต1 หรือ Sheet1) ยังว่างอยู่ ให้ใช้แท็บแรกสุดทันทีเพื่อให้เปิดลิงก์มาแล้วเห็นข้อมูลเลย
+    if (allSheets.length > 0 && allSheets[0].getLastRow() === 0 && allSheets[0].getName() !== SHEET_PRODUCTS) {
+      sheet = allSheets[0];
+      try {
+        sheet.setName(SHEET_ORDERS);
+      } catch (e) {}
+    } else {
+      sheet = ss.insertSheet(SHEET_ORDERS, 0);
+    }
   }
+
   if (sheet.getLastRow() === 0) {
     const headers = [
       'รหัสคำสั่งซื้อ (Order ID)',
@@ -241,4 +293,3 @@ function jsonResponse(obj) {
     .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
 }
-
