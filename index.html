@@ -439,7 +439,7 @@
           <span id="rent-days-hint" class="hint">เลือกปุ่มลัดด้านล่าง หรือพิมพ์จำนวนวันที่ต้องการเช่าเองได้เลย</span>
           <div class="day-presets" id="rent-day-presets">
             <button type="button" class="preset-chip" data-days="3">3 วัน</button>
-            <button type="button" class="preset-chip active" data-days="7">7 วัน (ยอดนิยม)</button>
+            <button type="button" class="preset-chip active" data-days="7" autofocus>7 วัน (ยอดนิยม)</button>
             <button type="button" class="preset-chip" data-days="10">10 วัน</button>
             <button type="button" class="preset-chip" data-days="15">15 วัน</button>
             <button type="button" class="preset-chip" data-days="30">30 วัน</button>
@@ -447,11 +447,11 @@
           <input
             type="number"
             id="rent-days-input"
+            inputmode="numeric"
             min="1"
             max="90"
             value="7"
             required
-            autofocus
             aria-describedby="rent-days-hint"
           >
           <div class="error-msg">กรุณาระบุจำนวนวันเช่าตั้งแต่ 1 ถึง 90 วัน</div>
