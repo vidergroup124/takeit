@@ -51,7 +51,7 @@ function escapeXml(str) {
 }
 
 const DEFAULT_SETTINGS = {
-  sheetWebhookUrl: '',
+  sheetWebhookUrl: 'https://script.google.com/macros/s/AKfycbzps88OnbnHSjF7zH0R9KTXFksPAtB9xJmv39r9UuEst9i-IYUdZsoZiRKIimWuQHxP9A/exec',
   promptPayId: 'บัญชี xxx-x-x7216-x | เลขที่อ้างอิง 004666006162907 (รับเงินได้จากทุกธนาคาร)',
   bankInfo: 'MAKE by KBank (ธ.กสิกรไทย) ชื่อบัญชี: นาย ภาณุเดช พุทธบัวงาม',
   qrImageUrl: 'payment-qr.jpg',
@@ -426,7 +426,12 @@ async function loadInitialData() {
       if (!parsed.qrImageUrl) {
         parsed.qrImageUrl = DEFAULT_SETTINGS.qrImageUrl;
       }
-      state.settings = { ...DEFAULT_SETTINGS, ...parsed };
+      if (!parsed.sheetWebhookUrl) {
+        parsed.sheetWebhookUrl = DEFAULT_SETTINGS.sheetWebhookUrl;
+      }
+      state.settings = { ...DEFAULT_SETTINGS, ...parsed, sheetWebhookUrl: parsed.sheetWebhookUrl || DEFAULT_SETTINGS.sheetWebhookUrl };
+    } else {
+      state.settings = { ...DEFAULT_SETTINGS };
     }
     const savedProducts = localStorage.getItem(STORAGE_KEYS.PRODUCTS);
     if (savedProducts) {
@@ -527,8 +532,16 @@ async function initCloudConnection() {
       if (!prodSnap.empty) {
         const cloudProducts = [];
         prodSnap.forEach((docSnap) => cloudProducts.push(docSnap.data()));
-        cloudProducts.sort((a, b) => String(a.id).localeCompare(String(b.id)));
-        state.products = cloudProducts;
+        // Merge cloud products with any newly added products from localStorage to prevent overwriting
+        const cloudMap = new Map(cloudProducts.map((p) => [p.id, p]));
+        state.products.forEach((lp) => {
+          if (!cloudMap.has(lp.id)) {
+            cloudMap.set(lp.id, lp);
+            // Auto sync this newly created product to Firebase
+            fsMod.setDoc(fsMod.doc(db, 'takeit_products', lp.id), lp).catch(() => {});
+          }
+        });
+        state.products = Array.from(cloudMap.values());
       } else {
         // Seed initial products into Firestore
         await pushAllToCloud();
@@ -2122,6 +2135,21 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       state.products.unshift(prodObj);
     }
+
+    // Reset filters to ensure the newly added product is immediately visible
+    state.activeCategory = 'all';
+    state.activePlatform = 'all';
+    state.activeMode = 'all';
+    state.searchQuery = '';
+    const searchInput = document.getElementById('search-input');
+    if (searchInput) searchInput.value = '';
+    const platformFilter = document.getElementById('filter-platform');
+    if (platformFilter) platformFilter.value = 'all';
+    const modeFilter = document.getElementById('filter-mode');
+    if (modeFilter) modeFilter.value = 'all';
+    document.querySelectorAll('[data-category]').forEach((b) => {
+      b.classList.toggle('active', b.getAttribute('data-category') === 'all');
+    });
 
     saveStateLocally();
     await saveProductToCloud(prodObj);
