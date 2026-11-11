@@ -782,15 +782,214 @@ table.data-table tbody tr:hover th {
   overflow: hidden;
 }
 
-.product-thumb-wrap img {
+.card-carousel-track {
+  display: flex;
+  inline-size: 100%;
+  block-size: 100%;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+}
+
+.card-carousel-track::-webkit-scrollbar {
+  display: none;
+}
+
+.card-carousel-slide {
+  flex: 0 0 100%;
+  inline-size: 100%;
+  block-size: 100%;
+  scroll-snap-align: center;
+  cursor: pointer;
+}
+
+.card-carousel-slide img {
   inline-size: 100%;
   block-size: 100%;
   object-fit: cover;
-  transition: transform 0.35s ease;
+  display: block;
 }
 
-.product-card:hover .product-thumb-wrap img {
-  transform: scale(1.04);
+.carousel-nav-btn {
+  position: absolute;
+  inset-block-start: 50%;
+  transform: translateY(-50%);
+  inline-size: 32px;
+  block-size: 32px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(7, 11, 20, 0.78);
+  color: #fff;
+  font-size: 1.1rem;
+  font-weight: 800;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  z-index: 4;
+  transition: background-color 0.2s ease, transform 0.15s ease;
+  backdrop-filter: blur(4px);
+}
+
+.carousel-nav-btn:hover {
+  background: var(--accent-cyan);
+  color: #050811;
+}
+
+.carousel-nav-prev {
+  inset-inline-start: 0.5rem;
+}
+
+.carousel-nav-next {
+  inset-inline-end: 0.5rem;
+}
+
+.carousel-dots {
+  position: absolute;
+  inset-block-end: 0.55rem;
+  inset-inline-start: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 0.35rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--radius-full);
+  background: rgba(7, 11, 20, 0.72);
+  z-index: 4;
+}
+
+.carousel-dot {
+  inline-size: 7px;
+  block-size: 7px;
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.38);
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.carousel-dot[aria-current="true"] {
+  inline-size: 18px;
+  background: var(--accent-cyan);
+}
+
+.photo-count-pill {
+  position: absolute;
+  inset-block-end: 0.55rem;
+  inset-inline-end: 0.6rem;
+  padding: 0.18rem 0.55rem;
+  border-radius: var(--radius-full);
+  background: rgba(7, 11, 20, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #e2e8f0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  z-index: 4;
+  cursor: pointer;
+}
+
+/* Full Product Gallery Modal */
+.gallery-stage-wrap {
+  position: relative;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: #040711;
+  border: 1px solid var(--border-subtle);
+}
+
+.gallery-main-track {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+  aspect-ratio: 16 / 10;
+  max-block-size: 56vh;
+}
+
+.gallery-main-track::-webkit-scrollbar {
+  display: none;
+}
+
+.gallery-main-slide {
+  flex: 0 0 100%;
+  inline-size: 100%;
+  block-size: 100%;
+  scroll-snap-align: center;
+  display: grid;
+  place-items: center;
+  background: #040711;
+}
+
+.gallery-main-slide img {
+  max-inline-size: 100%;
+  max-block-size: 54vh;
+  object-fit: contain;
+}
+
+.gallery-thumbs-nav {
+  display: flex;
+  gap: 0.6rem;
+  overflow-x: auto;
+  padding-block: 0.85rem 0.25rem;
+}
+
+.gallery-thumb-btn {
+  flex: 0 0 84px;
+  inline-size: 84px;
+  block-size: 56px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 2px solid transparent;
+  padding: 0;
+  background: #0f172a;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+}
+
+.gallery-thumb-btn[aria-current="true"],
+.gallery-thumb-btn:hover {
+  opacity: 1;
+  border-color: var(--accent-cyan);
+  transform: translateY(-2px);
+}
+
+.gallery-thumb-btn img {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+
+/* Admin Multi-Image Grid */
+.admin-image-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(145px, 1fr));
+  gap: 0.75rem;
+  margin-block-top: 0.75rem;
+}
+
+.admin-image-card {
+  background: rgba(7, 11, 20, 0.85);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 0.45rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  position: relative;
+}
+
+.admin-image-card.is-cover {
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 0 1px var(--accent-cyan);
+}
+
+.admin-image-card img {
+  inline-size: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  border-radius: 6px;
 }
 
 .card-badges-top {

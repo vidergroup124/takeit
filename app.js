@@ -259,10 +259,44 @@ let state = {
   activeMode: 'all',
   searchQuery: '',
   pendingSlipDataUrl: '',
-  pendingProductImageDataUrl: '',
+  editingProductImages: [],
   firestoreDb: null,
   firebaseModules: null
 };
+
+function getProductImages(p) {
+  if (!p) return [];
+  if (Array.isArray(p.images) && p.images.length > 0) {
+    return p.images.filter(Boolean);
+  }
+  const fallback = p.image || makeProductBannerSvg(p.name || 'TakeIT', p.platform || 'Console', '#1e3a8a', '#0f172a', '🎮');
+  return [fallback];
+}
+
+function ensureProductGalleryImages(products) {
+  if (!Array.isArray(products)) return [];
+  return products.map((p) => {
+    const primary = (Array.isArray(p.images) && p.images[0]) || p.image || makeProductBannerSvg(p.name, p.platform, '#1e3a8a', '#0f172a', '🎮');
+    let images = Array.isArray(p.images) && p.images.length > 0 ? [...p.images] : [primary];
+
+    // If this is a built-in default product that only had 1 image from earlier, add 2 extra preview slides so the user can immediately test multi-image sliding
+    if (String(p.id || '').startsWith('PROD-') && images.length === 1) {
+      const slide2 = p.canRent
+        ? makeProductBannerSvg(p.name, `แผ่นแท้ 100% • เช่า ${formatTHB(p.rentPricePerDay)}/วัน + มัดจำ ${formatTHB(p.rentDeposit)}`, '#4c1d95', '#0f172a', '💿')
+        : makeProductBannerSvg(p.name, `ภาพสินค้ามุมที่ 2 • อุปกรณ์ครบกล่องแท้ศูนย์`, '#0f766e', '#0f172a', '📦');
+      const slide3 = p.canRent
+        ? makeProductBannerSvg('บริการเช่าแผ่น TakeIT', 'ส่งแผ่นคืนฟรี! ทางร้านจ่ายค่าส่งของกลับให้', '#065f46', '#0f172a', '🚚')
+        : makeProductBannerSvg('รับประกันคุณภาพ TakeIT', 'แพ็กกันกระแทกหนาพิเศษ จัดส่งด่วนทุกวัน', '#1e3a8a', '#090d16', '🛡️');
+      images = [primary, slide2, slide3];
+    }
+
+    return {
+      ...p,
+      image: images[0],
+      images
+    };
+  });
+}
 
 // ============================================================================
 // Modern Web Guidance Fallbacks & Accessibility Helpers
@@ -435,9 +469,11 @@ async function loadInitialData() {
   if (!Array.isArray(state.products) || state.products.length === 0) {
     state.products = [...DEFAULT_PRODUCTS];
   }
+  state.products = ensureProductGalleryImages(state.products);
 
   // 3. Connect to Firebase Firestore or Supabase if configured
   await initCloudConnection();
+  state.products = ensureProductGalleryImages(state.products);
 
   saveStateLocally();
   renderAll();
@@ -860,6 +896,7 @@ function renderStorefront() {
   grid.innerHTML = filtered.map((p) => {
     const isReady = p.status === 'ready' && Number(p.stock) > 0;
     const isComingSoon = p.status === 'coming_soon';
+    const images = getProductImages(p);
 
     let statusBadgeHtml = '';
     if (isComingSoon) {
@@ -871,6 +908,29 @@ function renderStorefront() {
     } else {
       statusBadgeHtml = `<span class="badge badge-emerald">✅ พร้อมส่ง (${p.stock})</span>`;
     }
+
+    const slidesHtml = images.map((imgSrc, idx) => `
+      <div class="card-carousel-slide" data-slide-index="${idx}" data-open-gallery="${p.id}">
+        <img src="${imgSrc}" alt="${escapeXml(p.name)} - รูปที่ ${idx + 1}" loading="lazy">
+      </div>
+    `).join('');
+
+    const navControlsHtml = images.length > 1
+      ? `
+        <button type="button" class="carousel-nav-btn carousel-nav-prev" data-card-prev="${p.id}" aria-label="ดูรูปก่อนหน้าของ ${escapeXml(p.name)}">‹</button>
+        <button type="button" class="carousel-nav-btn carousel-nav-next" data-card-next="${p.id}" aria-label="ดูรูปถัดไปของ ${escapeXml(p.name)}">›</button>
+        <div class="carousel-dots" role="group" aria-label="ตัวบอกตำแหน่งรูปภาพ">
+          ${images.map((_, idx) => `<button type="button" class="carousel-dot" data-card-dot="${p.id}" data-dot-idx="${idx}" aria-label="รูปที่ ${idx + 1}" ${idx === 0 ? 'aria-current="true"' : ''}></button>`).join('')}
+        </div>
+        <button type="button" class="photo-count-pill" data-open-gallery="${p.id}" data-slide-index="0" title="คลิกเพื่อขยายดูรูปทั้งหมด">
+          🖼️ ${images.length} รูป
+        </button>
+      `
+      : `
+        <button type="button" class="photo-count-pill" data-open-gallery="${p.id}" data-slide-index="0" title="คลิกเพื่อดูรูปขนาดใหญ่">
+          🔍 ดูรูปใหญ่
+        </button>
+      `;
 
     const rentSectionHtml = p.canRent
       ? `
@@ -911,13 +971,16 @@ function renderStorefront() {
     }
 
     return `
-      <article class="product-card">
+      <article class="product-card" data-card-prod-id="${p.id}">
         <div class="product-thumb-wrap">
-          <img src="${p.image || makeProductBannerSvg(p.name, p.platform, '#1e3a8a', '#0f172a', '🎮')}" alt="${escapeXml(p.name)}" loading="lazy">
+          <div class="card-carousel-track" data-carousel-track="${p.id}">
+            ${slidesHtml}
+          </div>
           <div class="card-badges-top">
             <span class="platform-pill platform-${escapeXml(p.platform)}">${escapeXml(p.platform)}</span>
             ${statusBadgeHtml}
           </div>
+          ${navControlsHtml}
         </div>
 
         <div class="product-body">
@@ -941,6 +1004,18 @@ function renderStorefront() {
     `;
   }).join('');
 
+  // Attach Card Carousel Prev / Next / Dots & Scroll-Snap State Sync
+  initCardCarousels(grid);
+
+  // Open Full Gallery Modal on slide/badge click
+  grid.querySelectorAll('[data-open-gallery]').forEach((el) => {
+    el.addEventListener('click', () => {
+      const prodId = el.getAttribute('data-open-gallery');
+      const idx = Number(el.getAttribute('data-slide-index') || 0);
+      openProductGalleryModal(prodId, idx);
+    });
+  });
+
   // Attach Buy & Rent click handlers
   grid.querySelectorAll('[data-buy-id]').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -954,6 +1029,177 @@ function renderStorefront() {
       const prodId = btn.getAttribute('data-rent-id');
       openRentalCalculatorModal(prodId);
     });
+  });
+}
+
+// Synchronize scroll-snap carousel state using scrollsnapchange + IntersectionObserver fallback
+function bindHorizontalSnapSync(trackEl, onActiveIndexChange) {
+  if (!trackEl) return;
+  const slides = Array.from(trackEl.children);
+  if (slides.length <= 1) return;
+
+  if ('onscrollsnapchange' in HTMLElement.prototype) {
+    trackEl.addEventListener('scrollsnapchange', (event) => {
+      const snappedSlide = event.snapTargetInline;
+      if (snappedSlide) {
+        const idx = slides.indexOf(snappedSlide);
+        if (idx > -1) onActiveIndexChange(idx);
+      }
+    });
+  } else if ('IntersectionObserver' in window) {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting && entry.intersectionRatio >= 0.6) {
+            const idx = slides.indexOf(entry.target);
+            if (idx > -1) onActiveIndexChange(idx);
+          }
+        });
+      },
+      { root: trackEl, threshold: 0.65 }
+    );
+    slides.forEach((slide) => observer.observe(slide));
+  }
+}
+
+function initCardCarousels(grid) {
+  grid.querySelectorAll('[data-carousel-track]').forEach((track) => {
+    const prodId = track.getAttribute('data-carousel-track');
+    const card = track.closest('.product-card');
+    const dots = Array.from(card.querySelectorAll(`[data-card-dot="${prodId}"]`));
+    const slides = Array.from(track.children);
+    if (slides.length <= 1) return;
+
+    let currentIdx = 0;
+    const setActiveDot = (idx) => {
+      currentIdx = idx;
+      dots.forEach((d, i) => {
+        if (i === idx) d.setAttribute('aria-current', 'true');
+        else d.removeAttribute('aria-current');
+      });
+    };
+
+    bindHorizontalSnapSync(track, setActiveDot);
+
+    const scrollToSlide = (idx) => {
+      const targetIdx = (idx + slides.length) % slides.length;
+      track.scrollTo({ left: targetIdx * track.clientWidth, behavior: 'smooth' });
+      setActiveDot(targetIdx);
+    };
+
+    card.querySelector(`[data-card-prev="${prodId}"]`)?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      scrollToSlide(currentIdx - 1);
+    });
+
+    card.querySelector(`[data-card-next="${prodId}"]`)?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      scrollToSlide(currentIdx + 1);
+    });
+
+    dots.forEach((dot, i) => {
+      dot.addEventListener('click', (e) => {
+        e.stopPropagation();
+        scrollToSlide(i);
+      });
+    });
+  });
+}
+
+// Full-screen Multi-Image Gallery Modal
+function openProductGalleryModal(productId, startIndex = 0) {
+  const product = state.products.find((p) => p.id === productId);
+  if (!product) return;
+
+  const images = getProductImages(product);
+  const dialog = document.getElementById('dialog-product-gallery');
+  const titleEl = document.getElementById('gallery-dialog-title');
+  const mainTrack = document.getElementById('gallery-main-track');
+  const thumbsNav = document.getElementById('gallery-thumbs-nav');
+  const detailsEl = document.getElementById('gallery-product-details');
+
+  titleEl.textContent = `🖼️ ${product.name} (${images.length} รูปภาพ)`;
+
+  mainTrack.innerHTML = images.map((src, idx) => `
+    <div class="gallery-main-slide" data-gallery-slide="${idx}">
+      <img src="${src}" alt="${escapeXml(product.name)} รูปที่ ${idx + 1}">
+    </div>
+  `).join('');
+
+  thumbsNav.innerHTML = images.map((src, idx) => `
+    <button type="button" class="gallery-thumb-btn" data-gallery-thumb="${idx}" aria-label="ดูรูปที่ ${idx + 1}" ${idx === startIndex ? 'aria-current="true"' : ''}>
+      <img src="${src}" alt="รูปย่อที่ ${idx + 1}">
+    </button>
+  `).join('');
+
+  const isReady = product.status === 'ready' && Number(product.stock) > 0;
+  const buyBtnHtml = isReady && Number(product.price) > 0
+    ? `<button type="button" class="btn btn-primary" id="gallery-buy-btn">🛒 ซื้อขาด ${formatTHB(product.price)}</button>`
+    : '';
+  const rentBtnHtml = isReady && product.canRent
+    ? `<button type="button" class="btn btn-rent" id="gallery-rent-btn">💿 เช่าแผ่นรายวัน (${formatTHB(product.rentPricePerDay)}/วัน + มัดจำ ${formatTHB(product.rentDeposit)})</button>`
+    : '';
+
+  detailsEl.innerHTML = `
+    <div class="highlight-box" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:1rem;">
+      <div style="flex:1; min-inline-size:240px;">
+        <span class="platform-pill platform-${escapeXml(product.platform)}">${escapeXml(product.platform)}</span>
+        <strong style="margin-inline-start:0.5rem; font-size:1.05rem;">${escapeXml(product.name)}</strong>
+        <p style="margin:0.4rem 0 0; font-size:0.88rem; color:var(--text-secondary);">${escapeXml(product.description || '')}</p>
+      </div>
+      <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+        ${buyBtnHtml}
+        ${rentBtnHtml}
+      </div>
+    </div>
+  `;
+
+  detailsEl.querySelector('#gallery-buy-btn')?.addEventListener('click', () => {
+    addToCartBuy(product.id);
+    dialog.close();
+  });
+
+  detailsEl.querySelector('#gallery-rent-btn')?.addEventListener('click', () => {
+    dialog.close();
+    openRentalCalculatorModal(product.id);
+  });
+
+  let activeIdx = startIndex;
+  const thumbBtns = Array.from(thumbsNav.querySelectorAll('.gallery-thumb-btn'));
+  const setActiveThumb = (idx) => {
+    activeIdx = idx;
+    thumbBtns.forEach((btn, i) => {
+      if (i === idx) btn.setAttribute('aria-current', 'true');
+      else btn.removeAttribute('aria-current');
+    });
+  };
+
+  bindHorizontalSnapSync(mainTrack, setActiveThumb);
+
+  const goToGallerySlide = (idx, smooth = true) => {
+    const targetIdx = (idx + images.length) % images.length;
+    mainTrack.scrollTo({
+      left: targetIdx * mainTrack.clientWidth,
+      behavior: smooth ? 'smooth' : 'instant'
+    });
+    setActiveThumb(targetIdx);
+  };
+
+  const prevBtn = document.getElementById('gallery-prev-btn');
+  const nextBtn = document.getElementById('gallery-next-btn');
+  prevBtn.hidden = images.length <= 1;
+  nextBtn.hidden = images.length <= 1;
+
+  prevBtn.onclick = () => goToGallerySlide(activeIdx - 1);
+  nextBtn.onclick = () => goToGallerySlide(activeIdx + 1);
+
+  thumbBtns.forEach((btn, i) => {
+    btn.addEventListener('click', () => goToGallerySlide(i));
+  });
+
+  dialog.showModal();
+  requestAnimationFrame(() => {
+    goToGallerySlide(startIndex, false);
   });
 }
 
@@ -1380,6 +1626,7 @@ function renderAdminProductsTable() {
   if (!tbody) return;
 
   tbody.innerHTML = state.products.map((p) => {
+    const imgs = getProductImages(p);
     const rentInfo = p.canRent
       ? `<span class="badge badge-purple">เช่า ${formatTHB(p.rentPricePerDay)}/วัน</span><br><span style="font-size:0.78rem; color:#fcd34d;">มัดจำ ${formatTHB(p.rentDeposit)}</span>`
       : `<span style="color:var(--text-muted); font-size:0.82rem;">ไม่เปิดเช่า (ขายอย่างเดียว)</span>`;
@@ -1392,10 +1639,10 @@ function renderAdminProductsTable() {
       <tr>
         <th scope="row">
           <div style="display:flex; align-items:center; gap:0.75rem;">
-            <img src="${p.image}" alt="${escapeXml(p.name)}" style="inline-size:52px; block-size:40px; object-fit:cover; border-radius:6px;">
+            <img src="${imgs[0]}" alt="${escapeXml(p.name)}" style="inline-size:52px; block-size:40px; object-fit:cover; border-radius:6px;">
             <div>
               <div style="font-weight:700;">${escapeXml(p.name)}</div>
-              <div style="font-size:0.74rem; color:var(--text-muted);">${escapeXml(p.id)}</div>
+              <div style="font-size:0.74rem; color:var(--text-muted);">${escapeXml(p.id)} • <span style="color:var(--accent-cyan);">🖼️ ${imgs.length} รูป</span></div>
             </div>
           </div>
         </th>
@@ -1409,7 +1656,7 @@ function renderAdminProductsTable() {
         <td>${statusText}</td>
         <td>
           <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
-            <button type="button" class="btn btn-outline btn-sm" data-edit-prod="${p.id}">✏️ แก้ไข</button>
+            <button type="button" class="btn btn-outline btn-sm" data-edit-prod="${p.id}">✏️ แก้ไข / เพิ่มรูป</button>
             <button type="button" class="btn btn-danger btn-sm" data-del-prod="${p.id}">🗑️ ลบ</button>
           </div>
         </td>
@@ -1437,13 +1684,60 @@ function renderAdminProductsTable() {
   });
 }
 
+function renderAdminProductImagesPreview() {
+  const container = document.getElementById('admin-prod-images-preview');
+  if (!container) return;
+
+  if (!state.editingProductImages || state.editingProductImages.length === 0) {
+    container.innerHTML = `
+      <div style="grid-column: 1 / -1; font-size:0.84rem; color:var(--text-muted); padding:0.5rem 0;">
+        ยังไม่ได้เพิ่มรูปภาพ (หากไม่เพิ่ม ระบบจะสร้างภาพปกอัตโนมัติให้)
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = state.editingProductImages.map((src, idx) => `
+    <div class="admin-image-card ${idx === 0 ? 'is-cover' : ''}">
+      <img src="${src}" alt="รูปสินค้าที่ ${idx + 1}">
+      <div style="font-size:0.74rem; font-weight:700; color:${idx === 0 ? 'var(--accent-cyan)' : 'var(--text-secondary)'};">
+        ${idx === 0 ? '⭐ รูปปกหลัก (รูปที่ 1)' : `รูปที่ ${idx + 1}`}
+      </div>
+      <div style="display:flex; gap:0.3rem; flex-wrap:wrap; margin-block-start:auto;">
+        ${idx > 0 ? `<button type="button" class="btn btn-outline btn-sm" data-make-cover-idx="${idx}" style="font-size:0.72rem; padding:0.25rem 0.45rem;">⬆️ ตั้งเป็นปก</button>` : ''}
+        <button type="button" class="btn btn-danger btn-sm" data-remove-img-idx="${idx}" style="font-size:0.72rem; padding:0.25rem 0.45rem;">🗑️ ลบ</button>
+      </div>
+    </div>
+  `).join('');
+
+  container.querySelectorAll('[data-make-cover-idx]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const idx = Number(btn.getAttribute('data-make-cover-idx'));
+      if (idx > 0 && idx < state.editingProductImages.length) {
+        const [picked] = state.editingProductImages.splice(idx, 1);
+        state.editingProductImages.unshift(picked);
+        renderAdminProductImagesPreview();
+      }
+    });
+  });
+
+  container.querySelectorAll('[data-remove-img-idx]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const idx = Number(btn.getAttribute('data-remove-img-idx'));
+      state.editingProductImages.splice(idx, 1);
+      renderAdminProductImagesPreview();
+    });
+  });
+}
+
 function openProductFormModal(productId = null) {
   const dialog = document.getElementById('dialog-product-form');
   const titleEl = document.getElementById('product-form-title');
-  state.pendingProductImageDataUrl = '';
 
   const prod = productId ? state.products.find((p) => p.id === productId) : null;
   titleEl.textContent = prod ? `✏️ แก้ไขสินค้า: ${prod.name}` : '➕ เพิ่มสินค้า / แผ่นเกมใหม่เข้าร้าน TakeIT';
+
+  state.editingProductImages = prod ? [...getProductImages(prod)] : [];
 
   document.getElementById('prod-id').value = prod ? prod.id : '';
   document.getElementById('prod-name').value = prod ? prod.name : '';
@@ -1456,10 +1750,11 @@ function openProductFormModal(productId = null) {
   document.getElementById('prod-rent-rate').value = prod ? (prod.rentPricePerDay || 45) : 45;
   document.getElementById('prod-rent-deposit').value = prod ? (prod.rentDeposit || 500) : 500;
   document.getElementById('prod-desc').value = prod ? (prod.description || '') : '';
-  document.getElementById('prod-image-url').value = prod && prod.image && !prod.image.startsWith('data:') ? prod.image : '';
+  document.getElementById('prod-image-url').value = '';
   document.getElementById('prod-image-file').value = '';
 
   document.getElementById('prod-rent-fields').style.opacity = document.getElementById('prod-can-rent').checked ? '1' : '0.45';
+  renderAdminProductImagesPreview();
   dialog.showModal();
 }
 
@@ -1753,14 +2048,32 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.getElementById('prod-image-file')?.addEventListener('change', async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
     try {
-      state.pendingProductImageDataUrl = await compressImageFileToDataUrl(file, 640, 0.8);
-      showToast('🖼️ เตรียมรูปภาพสินค้าพร้อมบันทึกแล้ว');
+      for (const file of files) {
+        const compressed = await compressImageFileToDataUrl(file, 720, 0.8);
+        state.editingProductImages.push(compressed);
+      }
+      e.target.value = '';
+      renderAdminProductImagesPreview();
+      showToast(`🖼️ เพิ่มรูปภาพจากเครื่อง ${files.length} รูปแล้ว! (รวม ${state.editingProductImages.length} รูป)`);
     } catch (err) {
       console.error('Product image upload error:', err);
     }
+  });
+
+  document.getElementById('btn-add-image-url')?.addEventListener('click', () => {
+    const urlInput = document.getElementById('prod-image-url');
+    const url = (urlInput?.value || '').trim();
+    if (!url) {
+      showToast('กรุณาวางลิงก์รูปภาพ (URL) ก่อนกดเพิ่มรูปครับ', 'warning');
+      return;
+    }
+    state.editingProductImages.push(url);
+    urlInput.value = '';
+    renderAdminProductImagesPreview();
+    showToast(`🖼️ เพิ่มลิงก์รูปภาพแล้ว! (รวม ${state.editingProductImages.length} รูป)`);
   });
 
   document.getElementById('admin-product-form')?.addEventListener('submit', async (e) => {
@@ -1776,13 +2089,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const rentPricePerDay = canRent ? Number(document.getElementById('prod-rent-rate').value || 0) : 0;
     const rentDeposit = canRent ? Number(document.getElementById('prod-rent-deposit').value || 0) : 0;
     const description = document.getElementById('prod-desc').value.trim();
-    const urlInput = document.getElementById('prod-image-url').value.trim();
+    const pendingUrl = document.getElementById('prod-image-url').value.trim();
 
-    const existingProd = existingId ? state.products.find((p) => p.id === existingId) : null;
-    const image =
-      state.pendingProductImageDataUrl ||
-      urlInput ||
-      (existingProd ? existingProd.image : makeProductBannerSvg(name, `${platform} • TakeIT`, '#1e3a8a', '#4c1d95', category === 'console' ? '🕹️' : '💿'));
+    if (pendingUrl) {
+      state.editingProductImages.push(pendingUrl);
+      document.getElementById('prod-image-url').value = '';
+    }
+
+    const finalImages = state.editingProductImages.length > 0
+      ? [...state.editingProductImages]
+      : [makeProductBannerSvg(name, `${platform} • TakeIT`, '#1e3a8a', '#4c1d95', category === 'console' ? '🕹️' : '💿')];
 
     const prodObj = {
       id: existingId || 'PROD-' + Date.now(),
@@ -1796,7 +2112,8 @@ document.addEventListener('DOMContentLoaded', () => {
       rentPricePerDay,
       rentDeposit,
       description,
-      image
+      image: finalImages[0],
+      images: finalImages
     };
 
     if (existingId) {

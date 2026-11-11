@@ -4,6 +4,25 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TakeIT — ศูนย์รวมเครื่องเกมคอนโซล แผ่นเกม (ซื้อ/เช่ารายวัน) และสินค้า IT สำหรับเกมเมอร์</title>
+
+  <!-- Open Graph & Social Sharing Meta Tags (สำหรับแสดงรูปปกเวลาแชร์ลิงก์ใน Facebook, IG, LINE, X) -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://vidergroup124.github.io/takeit/">
+  <meta property="og:title" content="TakeIT — ศูนย์รวมเครื่องเกมคอนโซล แผ่นเกม (ซื้อ/เช่ารายวัน) และสินค้า IT สำหรับเกมเมอร์">
+  <meta property="og:description" content="ศูนย์รวมเครื่องเกมคอนโซล แผ่นเกมคอนโซลแท้ (ซื้อขาด / เช่ารายวันส่งกลับฟรี) และสินค้า IT สำหรับเกมเมอร์">
+  <meta property="og:image" content="https://vidergroup124.github.io/takeit/og-image.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="1200">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="TakeIT — ศูนย์รวมเครื่องเกมคอนโซล แผ่นเกม (ซื้อ/เช่ารายวัน) และสินค้า IT">
+  <meta name="twitter:description" content="ศูนย์รวมเครื่องเกมคอนโซล แผ่นเกมคอนโซลแท้ (ซื้อขาด / เช่ารายวันส่งกลับฟรี) และสินค้า IT สำหรับเกมเมอร์">
+  <meta name="twitter:image" content="https://vidergroup124.github.io/takeit/og-image.jpg">
+
+  <link rel="icon" href="og-image.jpg" type="image/jpeg">
+  <link rel="apple-touch-icon" href="og-image.jpg">
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Prompt:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -815,16 +834,31 @@
         <textarea id="prod-desc" rows="2" placeholder="ระบุโซนแผ่นเกม ภาษาที่รองรับ อุปกรณ์ในกล่อง หรือเงื่อนไขการเช่า"></textarea>
       </div>
 
-      <div class="form-grid-2">
-        <div class="field">
-          <label for="prod-image-url">ลิงก์รูปภาพสินค้า (URL)</label>
-          <input type="url" id="prod-image-url" placeholder="https://...">
+      <!-- Multi-Image Uploader & Gallery Manager -->
+      <div class="highlight-box" style="margin-block-end:1.1rem; padding:1rem;">
+        <h3 style="margin:0 0 0.35rem; font-size:0.98rem; color:var(--accent-cyan);">
+          🖼️ รูปภาพสินค้า (เพิ่มได้หลายรูป เลื่อนดูรูปเพิ่มเติมได้)
+        </h3>
+        <span class="hint">คุณสามารถอัปโหลดไฟล์รูปจากเครื่องพร้อมกันหลายรูป หรือวางลิงก์รูปภาพเพิ่มได้เรื่อยๆ (รูปที่ 1 จะเป็นรูปปกหลัก)</span>
+
+        <div class="form-grid-2" style="margin-block-top:0.65rem; align-items:end;">
+          <div class="field" style="margin-block-end:0;">
+            <label for="prod-image-file">1. เลือกรูปจากเครื่อง (เลือกพร้อมกันหลายรูปได้)</label>
+            <input type="file" id="prod-image-file" accept="image/*" multiple>
+          </div>
+
+          <div class="field" style="margin-block-end:0;">
+            <label for="prod-image-url">2. หรือเพิ่มจากลิงก์รูปภาพ (URL)</label>
+            <div style="display:flex; gap:0.45rem;">
+              <input type="url" id="prod-image-url" placeholder="https://...">
+              <button type="button" class="btn btn-outline btn-sm" id="btn-add-image-url">
+                ➕ เพิ่มรูป
+              </button>
+            </div>
+          </div>
         </div>
 
-        <div class="field">
-          <label for="prod-image-file">หรืออัปโหลดรูปภาพสินค้าจากเครื่อง</label>
-          <input type="file" id="prod-image-file" accept="image/*">
-        </div>
+        <div id="admin-prod-images-preview" class="admin-image-grid" aria-live="polite"></div>
       </div>
 
       <div class="dialog-footer" style="padding-inline:0; padding-block-end:0; background:transparent;">
@@ -866,6 +900,27 @@
       <button type="button" class="btn btn-outline btn-sm" data-close-dialog="dialog-info-viewer" aria-label="ปิดหน้าต่าง">✕ ปิด</button>
     </div>
     <div class="dialog-body" id="info-viewer-body"></div>
+  </dialog>
+
+  <!-- ========================================================================
+       DIALOG 7: Product Multi-Image Gallery & Details Modal
+       ======================================================================== -->
+  <dialog id="dialog-product-gallery" closedby="any" aria-labelledby="gallery-dialog-title" style="max-inline-size: min(820px, 95vw);">
+    <div class="dialog-header">
+      <h2 id="gallery-dialog-title">🖼️ รูปภาพและรายละเอียดสินค้า</h2>
+      <button type="button" class="btn btn-outline btn-sm" data-close-dialog="dialog-product-gallery" aria-label="ปิดหน้าต่าง">✕ ปิด</button>
+    </div>
+    <div class="dialog-body">
+      <div class="gallery-stage-wrap">
+        <button type="button" class="carousel-nav-btn carousel-nav-prev" id="gallery-prev-btn" aria-label="รูปก่อนหน้า">‹</button>
+        <div class="gallery-main-track" id="gallery-main-track"></div>
+        <button type="button" class="carousel-nav-btn carousel-nav-next" id="gallery-next-btn" aria-label="รูปถัดไป">›</button>
+      </div>
+
+      <nav aria-label="เลือกรูปภาพสินค้า" class="gallery-thumbs-nav" id="gallery-thumbs-nav"></nav>
+
+      <div id="gallery-product-details" style="margin-block-top:1rem;"></div>
+    </div>
   </dialog>
 
   <!-- Toast Container -->
