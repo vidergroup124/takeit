@@ -860,22 +860,32 @@
 
       <!-- Multi-Image Uploader & Gallery Manager -->
       <div class="highlight-box" style="margin-block-end:1.1rem; padding:1rem;">
-        <h3 style="margin:0 0 0.35rem; font-size:0.98rem; color:var(--accent-cyan);">
-          🖼️ รูปภาพสินค้า (เพิ่มได้หลายรูป เลื่อนดูรูปเพิ่มเติมได้)
-        </h3>
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:0.5rem; flex-wrap:wrap; margin-block-end:0.35rem;">
+          <h3 style="margin:0; font-size:0.98rem; color:var(--accent-cyan);">
+            🖼️ รูปภาพสินค้า (เพิ่มได้หลายรูป เลื่อนดูรูปเพิ่มเติมได้)
+          </h3>
+          <button type="button" class="btn btn-danger btn-sm" id="btn-clear-all-images" style="font-size:0.75rem; padding:0.25rem 0.6rem;" hidden>
+            🗑️ ลบรูปทั้งหมด
+          </button>
+        </div>
         <span class="hint">คุณสามารถอัปโหลดไฟล์รูปจากเครื่องพร้อมกันหลายรูป หรือวางลิงก์รูปภาพเพิ่มได้เรื่อยๆ (รูปที่ 1 จะเป็นรูปปกหลัก)</span>
 
         <div class="form-grid-2" style="margin-block-top:0.65rem; align-items:end;">
           <div class="field" style="margin-block-end:0;">
-            <label for="prod-image-file">1. เลือกรูปจากเครื่อง (เลือกพร้อมกันหลายรูปได้)</label>
-            <input type="file" id="prod-image-file" accept="image/*" multiple>
+            <label for="prod-image-file">1. เลือกรูปจากเครื่อง / มือถือ (เลือกได้หลายรูป)</label>
+            <div style="display:flex; gap:0.45rem; align-items:center;">
+              <button type="button" class="btn btn-primary btn-sm" id="btn-trigger-image-file" style="white-space:nowrap;">
+                📁 เลือกรูปภาพเพิ่ม
+              </button>
+              <input type="file" id="prod-image-file" accept="image/*" multiple style="font-size:0.82rem; max-inline-size:100%;">
+            </div>
           </div>
 
           <div class="field" style="margin-block-end:0;">
             <label for="prod-image-url">2. หรือเพิ่มจากลิงก์รูปภาพ (URL)</label>
             <div style="display:flex; gap:0.45rem;">
-              <input type="url" id="prod-image-url" placeholder="https://...">
-              <button type="button" class="btn btn-outline btn-sm" id="btn-add-image-url">
+              <input type="text" id="prod-image-url" placeholder="วางลิงก์รูปภาพ https://... แล้วกดเพิ่มรูป" autocomplete="off">
+              <button type="button" class="btn btn-outline btn-sm" id="btn-add-image-url" style="white-space:nowrap;">
                 ➕ เพิ่มรูป
               </button>
             </div>
@@ -950,7 +960,7 @@
   <!-- Toast Container -->
   <div id="toast-container" class="toast-container" aria-live="polite"></div>
 
-  <script src="app.js?v=20261111-gmail1" defer></script>
+  <script src="app.js?v=20261111-imgfix2" defer></script>
 </body>
 </html>
 
