@@ -249,7 +249,7 @@
               </div>
               <div class="field">
                 <label for="setting-qr-file">อัปโหลดรูป QR Code ใหม่ (ปัจจุบันใช้รูป QR ของ นาย ภาณุเดช พุทธบัวงาม)</label>
-                <input type="file" id="setting-qr-file" accept="image/*">
+                <input type="file" id="setting-qr-file" accept="image/*,.heic,.heif,image/heic,image/heif">
               </div>
               <div class="field">
                 <label for="setting-shipping-fee">ค่าจัดส่งมาตรฐานต่อออเดอร์ (บาท)</label>
@@ -679,11 +679,11 @@
 
               <div class="field" style="margin-block-end:0;">
                 <label for="cust-slip-file">อัปโหลดรูปสลิปโอนเงิน *</label>
-                <span id="cust-slip-hint" class="hint">รองรับไฟล์รูปภาพ JPG, PNG, WEBP จากแอปธนาคาร</span>
+                <span id="cust-slip-hint" class="hint">รองรับไฟล์รูปภาพ JPG, PNG, WEBP หรือ HEIC จาก iPhone / แอปธนาคาร</span>
                 <input
                   type="file"
                   id="cust-slip-file"
-                  accept="image/*"
+                  accept="image/*,.heic,.heif,image/heic,image/heif"
                   required
                   aria-describedby="cust-slip-hint"
                 >
@@ -872,12 +872,12 @@
 
         <div class="form-grid-2" style="margin-block-top:0.65rem; align-items:end;">
           <div class="field" style="margin-block-end:0;">
-            <label for="prod-image-file">1. เลือกรูปจากเครื่อง / มือถือ (เลือกได้หลายรูป)</label>
+            <label for="prod-image-file">1. เลือกรูปจากเครื่อง / มือถือ (JPG, PNG, HEIC iPhone)</label>
             <div style="display:flex; gap:0.45rem; align-items:center;">
               <button type="button" class="btn btn-primary btn-sm" id="btn-trigger-image-file" style="white-space:nowrap;">
                 📁 เลือกรูปภาพเพิ่ม
               </button>
-              <input type="file" id="prod-image-file" accept="image/*" multiple style="font-size:0.82rem; max-inline-size:100%;">
+              <input type="file" id="prod-image-file" accept="image/*,.heic,.heif,image/heic,image/heif" multiple style="font-size:0.82rem; max-inline-size:100%;">
             </div>
           </div>
 
@@ -960,7 +960,9 @@
   <!-- Toast Container -->
   <div id="toast-container" class="toast-container" aria-live="polite"></div>
 
-  <script src="app.js?v=20261111-imgfix2" defer></script>
+  <!-- HEIC/HEIF image decoder for Apple iPhone photos in Chrome & other browsers -->
+  <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js" defer></script>
+  <script src="app.js?v=20261111-heic1" defer></script>
 </body>
 </html>
 

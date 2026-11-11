@@ -1154,7 +1154,92 @@ function formatThaiDate(dateStr) {
   }
 }
 
-function compressImageFileToDataUrl(file, maxWidth = 600, quality = 0.72) {
+async function isHeicFile(file) {
+  if (!file) return false;
+  const name = String(file.name || '').toLowerCase();
+  const type = String(file.type || '').toLowerCase();
+  if (name.endsWith('.heic') || name.endsWith('.heif') || type.includes('heic') || type.includes('heif')) {
+    return true;
+  }
+  // Check magic bytes / ftyp box in first 24 bytes in case MIME type or extension was omitted
+  try {
+    const slice = file.slice(0, 24);
+    const buf = await slice.arrayBuffer();
+    const str = String.fromCharCode(...new Uint8Array(buf));
+    return str.includes('ftyp') && (
+      str.includes('heic') ||
+      str.includes('heix') ||
+      str.includes('heim') ||
+      str.includes('heis') ||
+      str.includes('mif1') ||
+      str.includes('msf1')
+    );
+  } catch (e) {
+    return false;
+  }
+}
+
+async function convertHeicToJpegBlob(file) {
+  // 1. Try browser native decoding first (e.g. Safari on iOS / macOS can decode HEIC natively)
+  if (typeof createImageBitmap === 'function') {
+    try {
+      const bmp = await createImageBitmap(file);
+      bmp.close();
+      return file;
+    } catch (_) {}
+  }
+
+  // 2. Load heic2any on-demand if not loaded yet
+  if (typeof window.heic2any !== 'function') {
+    await new Promise((resolve, reject) => {
+      const existing = document.querySelector('script[src*="heic2any"]');
+      if (existing) {
+        if (typeof window.heic2any === 'function') return resolve();
+        existing.addEventListener('load', () => resolve());
+        existing.addEventListener('error', () => reject(new Error('โหลดตัวแปลง HEIC ไม่สำเร็จ')));
+        return;
+      }
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js';
+      s.async = true;
+      s.onload = () => resolve();
+      s.onerror = () => {
+        const fb = document.createElement('script');
+        fb.src = 'https://cdnjs.cloudflare.com/ajax/libs/heic2any/0.0.4/heic2any.min.js';
+        fb.async = true;
+        fb.onload = () => resolve();
+        fb.onerror = () => reject(new Error('ไม่สามารถโหลดระบบอ่านไฟล์รูป HEIC ได้'));
+        document.head.appendChild(fb);
+      };
+      document.head.appendChild(s);
+    });
+  }
+
+  if (typeof window.heic2any === 'function') {
+    const converted = await window.heic2any({
+      blob: file,
+      toType: 'image/jpeg',
+      quality: 0.86
+    });
+    return Array.isArray(converted) ? converted[0] : converted;
+  }
+  return file;
+}
+
+async function compressImageFileToDataUrl(file, maxWidth = 600, quality = 0.72) {
+  let blobToProcess = file;
+  const isHeic = await isHeicFile(file);
+
+  if (isHeic) {
+    showToast(`🔄 กำลังแปลงไฟล์ ${file.name || 'HEIC'} จาก iPhone เป็นภาพที่แสดงผลได้...`, 'info');
+    try {
+      blobToProcess = await convertHeicToJpegBlob(file);
+    } catch (err) {
+      console.error('HEIC conversion failed:', err);
+      throw new Error(`ไม่สามารถแปลงไฟล์ HEIC ได้ (${err.message || 'เบราว์เซอร์ไม่รองรับ'})`);
+    }
+  }
+
   return new Promise((resolve, reject) => {
     const processImageElement = (img, cleanupUrl) => {
       try {
@@ -1188,15 +1273,14 @@ function compressImageFileToDataUrl(file, maxWidth = 600, quality = 0.72) {
       }
     };
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => processImageElement(img, null);
-      img.onerror = (err) => reject(err);
-      img.src = e.target.result;
+    const objectUrl = URL.createObjectURL(blobToProcess);
+    const img = new Image();
+    img.onload = () => processImageElement(img, objectUrl);
+    img.onerror = (err) => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error(`เบราว์เซอร์ไม่สามารถเปิดรูป "${file.name || 'ภาพนี้'}" ได้`));
     };
-    reader.onerror = (err) => reject(err);
-    reader.readAsDataURL(file);
+    img.src = objectUrl;
   });
 }
 
@@ -2619,13 +2703,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       } catch (err) {
         console.error('Product image upload error:', err);
-        showToast(`⚠️ ไม่สามารถอ่านไฟล์รูป "${file.name}" ได้ กรุณาลองใช้ไฟล์ JPG หรือ PNG ครับ`, 'warning');
+        showToast(`⚠️ ${err.message || `ไม่สามารถอ่านไฟล์รูป "${file.name}" ได้`}`, 'warning');
       }
     }
 
     renderAdminProductImagesPreview();
     if (addedCount > 0) {
-      showToast(`🖼️ เพิ่มรูปภาพจากเครื่อง ${addedCount} รูปแล้ว! (รวม ${state.editingProductImages.length} รูป)`);
+      showToast(`🖼️ เพิ่มรูปภาพเรียบร้อย ${addedCount} รูป! (รวม ${state.editingProductImages.length} รูป)`);
     }
   });
 
