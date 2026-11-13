@@ -26,7 +26,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Prompt:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20261111-gmail1">
+  <link rel="stylesheet" href="styles.css?v=20261113-contract1">
   <style>
     /* Force override any cached mobile CSS so modal dialogs never collapse on iOS / Instagram browser */
     dialog[open] {
@@ -695,6 +695,27 @@
             </div>
           </div>
 
+          <!-- Automatic Electronic Rental & Sales Contract Box -->
+          <div class="highlight-box" style="margin-block-top:1rem; padding:0.9rem 1rem; border-color:rgba(56, 189, 248, 0.45); background:rgba(15, 23, 42, 0.78);">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.6rem;">
+              <div>
+                <div style="font-weight:700; font-size:0.92rem; color:var(--accent-cyan);">
+                  📜 ระบบสร้างสัญญาเช่าแผ่นเกมและสัญญาซื้อขายอิเล็กทรอนิกส์อัตโนมัติ
+                </div>
+                <div style="font-size:0.8rem; color:var(--text-secondary); margin-block-start:0.15rem;">
+                  เมื่อกดยืนยันคำสั่งซื้อ ระบบจะออกเอกสารสัญญาเช่า/ซื้อขายฉบับจริงพร้อมเลขที่สัญญาให้อัตโนมัติ สามารถพิมพ์หรือบันทึกเก็บไว้เป็นหลักฐานได้ทันที
+                </div>
+              </div>
+              <button type="button" class="btn btn-outline btn-sm" id="btn-preview-draft-contract" style="white-space:nowrap;">
+                👁️ ดูตัวอย่างร่างสัญญาของออเดอร์นี้
+              </button>
+            </div>
+            <label style="display:flex; align-items:flex-start; gap:0.55rem; margin-block-start:0.65rem; padding-block-start:0.6rem; border-block-start:1px solid var(--border-subtle); font-size:0.83rem; color:var(--text-primary); cursor:pointer;">
+              <input type="checkbox" id="cust-accept-contract" checked required style="inline-size:18px; block-size:18px; margin-block-start:0.1rem; flex-shrink:0;">
+              <span>ข้าพเจ้ายืนยันว่าข้อมูลข้างต้นถูกต้อง และตกลงยอมรับเงื่อนไขตามหนังสือสัญญาเช่าแผ่นเกมรายวัน / สัญญาซื้อขายสินค้าของร้าน <strong>TakeIT Gaming &amp; Console</strong></span>
+            </label>
+          </div>
+
           <div class="dialog-footer" style="padding-inline:0; padding-block-end:0; margin-block-start:1.35rem; background:transparent;">
             <button type="button" class="btn btn-danger btn-sm" id="btn-clear-cart" style="margin-inline-end:auto;">🗑️ ล้างตะกร้า</button>
             <button type="button" class="btn btn-outline" data-close-dialog="dialog-cart">เลือกสินค้าต่อ</button>
@@ -957,12 +978,28 @@
     </div>
   </dialog>
 
+  <!-- ========================================================================
+       DIALOG 8: Automatic Electronic Rental & Sales Contract Modal
+       ======================================================================== -->
+  <dialog id="dialog-contract" closedby="any" aria-labelledby="contract-dialog-title" style="max-inline-size: min(860px, 96vw);">
+    <div class="dialog-header">
+      <h2 id="contract-dialog-title">📜 หนังสือสัญญาเช่าแผ่นเกมและสัญญาซื้อขายอิเล็กทรอนิกส์</h2>
+      <div style="display:flex; gap:0.4rem; align-items:center; flex-wrap:wrap;">
+        <button type="button" class="btn btn-primary btn-sm" id="btn-contract-print">🖨️ พิมพ์ / บันทึก PDF</button>
+        <button type="button" class="btn btn-outline btn-sm" id="btn-contract-download">💾 ดาวน์โหลดไฟล์</button>
+        <button type="button" class="btn btn-outline btn-sm" id="btn-contract-copy">📋 คัดลอกข้อความ</button>
+        <button type="button" class="btn btn-outline btn-sm" data-close-dialog="dialog-contract" aria-label="ปิดหน้าต่าง">✕ ปิด</button>
+      </div>
+    </div>
+    <div class="dialog-body" id="contract-dialog-body"></div>
+  </dialog>
+
   <!-- Toast Container -->
   <div id="toast-container" class="toast-container" aria-live="polite"></div>
 
   <!-- HEIC/HEIF image decoder for Apple iPhone photos in Chrome & other browsers -->
   <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js" defer></script>
-  <script src="app.js?v=20261111-heic1" defer></script>
+  <script src="app.js?v=20261113-contract1" defer></script>
 </body>
 </html>
 

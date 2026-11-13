@@ -1713,3 +1713,189 @@ table.data-table tbody tr:hover th {
   }
 }
 
+/* ==========================================================================
+   Electronic Rental & Sales Contract Document Styling
+   ========================================================================== */
+.contract-paper {
+  background: #ffffff;
+  color: #0f172a;
+  padding: 2rem 2.2rem;
+  border-radius: var(--radius-md);
+  border: 2px solid #cbd5e1;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  font-family: 'Prompt', 'Inter', sans-serif;
+  line-height: 1.65;
+  font-size: 0.9rem;
+}
+
+.contract-doc-header {
+  text-align: center;
+  border-block-end: 2px solid #0f172a;
+  padding-block-end: 1rem;
+  margin-block-end: 1.15rem;
+}
+
+.contract-doc-badge {
+  display: inline-block;
+  background: #0f172a;
+  color: #38bdf8;
+  font-weight: 800;
+  font-size: 0.76rem;
+  padding: 0.22rem 0.85rem;
+  border-radius: 999px;
+  letter-spacing: 0.04em;
+  margin-block-end: 0.45rem;
+}
+
+.contract-doc-title {
+  margin: 0 0 0.25rem;
+  font-size: 1.28rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.contract-doc-subtitle {
+  margin: 0;
+  font-size: 0.84rem;
+  color: #475569;
+}
+
+.contract-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+  margin-block-end: 1.1rem;
+  font-size: 0.84rem;
+}
+
+.contract-parties-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 0.85rem;
+  margin-block-end: 1.15rem;
+}
+
+.contract-party-card {
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+  font-size: 0.85rem;
+}
+
+.contract-party-card h4 {
+  margin: 0 0 0.4rem;
+  font-size: 0.92rem;
+  color: #0f172a;
+  border-block-end: 1px dashed #cbd5e1;
+  padding-block-end: 0.3rem;
+}
+
+.contract-section-title {
+  margin: 1.1rem 0 0.5rem;
+  font-size: 0.96rem;
+  font-weight: 800;
+  color: #0f172a;
+  background: #f1f5f9;
+  padding: 0.38rem 0.75rem;
+  border-inline-start: 4px solid #0284c7;
+  border-radius: 4px;
+}
+
+.contract-items-table {
+  inline-size: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  margin-block-end: 0.9rem;
+}
+
+.contract-items-table th,
+.contract-items-table td {
+  border: 1px solid #cbd5e1;
+  padding: 0.5rem 0.65rem;
+  text-align: start;
+  vertical-align: top;
+}
+
+.contract-items-table thead th {
+  background: #0f172a;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.contract-clauses {
+  margin: 0 0 1.1rem;
+  padding-inline-start: 1.25rem;
+  font-size: 0.83rem;
+  color: #1e293b;
+}
+
+.contract-clauses li {
+  margin-block-end: 0.4rem;
+}
+
+.contract-signatures-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-block-top: 1.35rem;
+  padding-block-start: 1rem;
+  border-block-start: 2px dashed #cbd5e1;
+}
+
+.contract-sig-box {
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 0.9rem;
+  text-align: center;
+  background: #f8fafc;
+  font-size: 0.82rem;
+}
+
+.contract-sig-name {
+  font-family: 'Prompt', cursive, sans-serif;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #0284c7;
+  padding: 0.35rem 0.75rem;
+  margin: 0.35rem auto;
+  display: inline-block;
+  border-block-end: 2px solid #94a3b8;
+  min-inline-size: 170px;
+}
+
+.contract-official-stamp {
+  display: inline-block;
+  border: 2px solid #0284c7;
+  color: #0284c7;
+  padding: 0.2rem 0.7rem;
+  border-radius: 6px;
+  font-weight: 800;
+  font-size: 0.74rem;
+  letter-spacing: 0.04em;
+  transform: rotate(-2deg);
+  margin-block: 0.25rem;
+  background: rgba(2, 132, 199, 0.06);
+}
+
+@media (max-width: 640px) {
+  .contract-paper {
+    padding: 1.1rem 0.95rem;
+    font-size: 0.83rem;
+  }
+
+  .contract-doc-title {
+    font-size: 1.05rem;
+  }
+
+  .contract-items-table {
+    display: block;
+    overflow-x: auto;
+  }
+}
+
+

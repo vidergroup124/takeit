@@ -2083,6 +2083,7 @@ function renderAdminOrdersTable() {
         </td>
         <td>
           <div style="display:flex; gap:0.35rem; flex-wrap:wrap;">
+            <button type="button" class="btn btn-primary btn-sm" data-admin-contract="${o.id}" title="เปิดดูหรือพิมพ์สัญญาเช่า/ซื้อขายของออเดอร์นี้">📜 ดู/พิมพ์สัญญา</button>
             <button type="button" class="btn btn-outline btn-sm" data-resync-order="${o.id}" title="ส่งข้อมูลออเดอร์นี้เข้า Google Sheets">📊 ส่งเข้า Sheet</button>
             <button type="button" class="btn btn-danger btn-sm" data-delete-order="${o.id}">ลบ</button>
           </div>
@@ -2104,6 +2105,15 @@ function renderAdminOrdersTable() {
       await sendOrderToGoogleSheet(ord, 'sync_order');
       renderAdminStats();
       showToast(`✅ อัปเดตสถานะออเดอร์ ${id} เป็น "${sel.value}" แล้ว`);
+    });
+  });
+
+  tbody.querySelectorAll('[data-admin-contract]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-admin-contract');
+      const ord = state.orders.find((o) => o.id === id);
+      if (!ord) return;
+      openOrderContractModal(ord, { unmasked: true, isDraft: false });
     });
   });
 
@@ -2450,6 +2460,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  document.getElementById('btn-preview-draft-contract')?.addEventListener('click', () => {
+    openDraftContractFromCart();
+  });
+
+  document.getElementById('btn-contract-print')?.addEventListener('click', () => {
+    printActiveContract();
+  });
+
+  document.getElementById('btn-contract-download')?.addEventListener('click', () => {
+    downloadActiveContractHtml();
+  });
+
+  document.getElementById('btn-contract-copy')?.addEventListener('click', () => {
+    copyActiveContractText();
+  });
+
   document.getElementById('guest-checkout-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (state.cart.length === 0) return;
@@ -2463,9 +2489,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const now = new Date();
     const orderId = 'TK-' + now.toISOString().slice(2, 10).replace(/-/g, '') + '-' + Math.floor(1000 + Math.random() * 9000);
+    const contractNo = 'CTR-' + orderId;
 
     const newOrder = {
       id: orderId,
+      contractNo,
+      contractAccepted: true,
+      contractAcceptedAt: now.toLocaleString('th-TH'),
       createdAt: now.toISOString(),
       createdAtFormatted: now.toLocaleString('th-TH'),
       orderTypeLabel,
@@ -2962,7 +2992,7 @@ function renderOrderLookupList(orders, isNewOrder = false, sentToSheet = false, 
       <div style="background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.35); padding:0.85rem 1rem; border-radius:var(--radius-sm); margin-block-end:1rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
         <div>
           <strong style="color:var(--accent-cyan); display:block;">👋 บัญชี: ${escapeXml(state.currentUser?.displayName || '')} (${escapeXml(state.currentUser?.email || '')})</strong>
-          <span style="font-size:0.82rem; color:var(--text-secondary);">พบประวัติคำสั่งซื้อของคุณทั้งหมด ${orders.length} รายการ</span>
+          <span style="font-size:0.82rem; color:var(--text-secondary);">พบประวัติคำสั่งซื้อและสัญญาอิเล็กทรอนิกส์ของคุณทั้งหมด ${orders.length} รายการ</span>
         </div>
         <span class="badge badge-cyan">ล็อกอินด้วย Gmail แล้ว</span>
       </div>
@@ -2972,24 +3002,40 @@ function renderOrderLookupList(orders, isNewOrder = false, sentToSheet = false, 
   const bannerHtml = isNewOrder
     ? `
       <div style="background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.45); padding:1rem; border-radius:var(--radius-sm); margin-block-end:1rem;">
-        <h3 style="margin:0 0 0.3rem; color:#34d399;">🎉 สั่งซื้อ / เช่าแผ่นเกมสำเร็จเรียบร้อย!</h3>
-        <p style="margin:0; font-size:0.88rem; color:var(--text-secondary);">
-          รหัสคำสั่งซื้อของคุณคือ <strong>${escapeXml(orders[0].id)}</strong>
-          ${sentToSheet ? '(บันทึกข้อมูลลง Google Sheets ของร้านเรียบร้อยแล้ว)' : '(บันทึกคำสั่งซื้อเข้าระบบร้าน TakeIT เรียบร้อยแล้ว)'}
-        </p>
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.75rem;">
+          <div>
+            <h3 style="margin:0 0 0.25rem; color:#34d399;">🎉 สั่งซื้อ / เช่าแผ่นเกม และสร้างสัญญาอัตโนมัติสำเร็จ!</h3>
+            <p style="margin:0; font-size:0.86rem; color:var(--text-secondary);">
+              รหัสคำสั่งซื้อ: <strong>${escapeXml(orders[0].id)}</strong> • เลขที่สัญญา: <strong>${escapeXml(orders[0].contractNo || ('CTR-' + orders[0].id))}</strong>
+              ${sentToSheet ? '(บันทึกข้อมูลลง Google Sheets เรียบร้อยแล้ว)' : '(บันทึกเข้าระบบร้าน TakeIT เรียบร้อยแล้ว)'}
+            </p>
+          </div>
+          <button type="button" class="btn btn-primary btn-sm" data-view-contract="${escapeXml(orders[0].id)}" data-unmasked="true">
+            📜 เปิดดู / พิมพ์สัญญาฉบับเต็ม
+          </button>
+        </div>
       </div>
     `
     : '';
 
   container.innerHTML = myOrdersHeader + bannerHtml + orders.map((o) => {
-    // If the viewer is the logged-in owner of this order, show unmasked name/phone. Otherwise mask for PDPA.
-    const isOwner = isMyOrders || isNewOrder || Boolean(state.currentUser && (
+    const qNorm = String(searchQuery || '').trim().toLowerCase();
+    const qDigits = String(searchQuery || '').replace(/\D/g, '');
+    const orderPhoneDigits = String(o.customer?.phone || '').replace(/\D/g, '');
+    const verifiedByExactQuery = Boolean(
+      (o.id && qNorm === o.id.toLowerCase()) ||
+      (qDigits.length >= 9 && orderPhoneDigits && qDigits === orderPhoneDigits)
+    );
+
+    // Show unmasked info if viewer is Admin, logged-in owner, just placed the order, or entered exact full Order ID / full phone number
+    const isOwner = state.isAdmin || isMyOrders || isNewOrder || verifiedByExactQuery || Boolean(state.currentUser && (
       (o.customerUid && o.customerUid === state.currentUser.uid) ||
       (o.customerEmail && state.currentUser.email && o.customerEmail.toLowerCase() === state.currentUser.email.toLowerCase())
     ));
 
     const displayName = isOwner ? (o.customer?.name || '-') : maskCustomerName(o.customer?.name);
     const displayPhone = isOwner ? (o.customer?.phone || '-') : maskPhone(o.customer?.phone);
+    const contractMeta = getContractMetadata(o);
 
     const itemsList = (o.items || []).map((item) => {
       if (item.mode === 'rent') {
@@ -3001,11 +3047,14 @@ function renderOrderLookupList(orders, isNewOrder = false, sentToSheet = false, 
     return `
       <div class="highlight-box" style="margin-block-end:0.85rem;">
         <div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:0.5rem; border-block-end:1px solid var(--border-subtle); padding-block-end:0.5rem; margin-block-end:0.6rem;">
-          <strong>รหัสออเดอร์: <span style="color:var(--accent-cyan);">${escapeXml(o.id)}</span></strong>
+          <div>
+            <strong>รหัสออเดอร์: <span style="color:var(--accent-cyan);">${escapeXml(o.id)}</span></strong>
+            <span style="font-size:0.78rem; color:var(--text-muted); margin-inline-start:0.5rem;">(เลขที่สัญญา: ${escapeXml(contractMeta.contractNo)})</span>
+          </div>
           <span class="badge badge-emerald">${escapeXml(o.status || 'รอตรวจสอบสลิป')}</span>
         </div>
         <div style="font-size:0.85rem; color:var(--text-secondary); margin-block-end:0.5rem;">
-          ผู้รับ: <strong>${escapeXml(maskedName)}</strong> (${escapeXml(maskedPhone)}) • วันที่สั่ง: ${escapeXml(o.createdAtFormatted)}
+          ผู้ทำสัญญา/ผู้รับ: <strong>${escapeXml(displayName)}</strong> (${escapeXml(displayPhone)}) • วันที่ทำสัญญา: ${escapeXml(o.createdAtFormatted)}
         </div>
         <ul style="margin:0 0 0.65rem; padding-inline-start:1.2rem; font-size:0.85rem;">
           ${itemsList}
@@ -3014,7 +3063,526 @@ function renderOrderLookupList(orders, isNewOrder = false, sentToSheet = false, 
           <span>รวมมัดจำแผ่นที่จะได้รับคืน: <strong style="color:#fcd34d;">${formatTHB(o.depositSubtotal)}</strong> <span style="font-size:0.8rem; color:#34d399;">(ค่าส่งของกลับตอนคืนแผ่น ทางร้านจ่ายให้)</span></span>
           <strong style="color:#34d399; font-size:1.05rem;">ยอดชำระสุทธิ: ${formatTHB(o.grandTotal)}</strong>
         </div>
+        <div style="display:flex; justify-content:flex-end; gap:0.5rem; flex-wrap:wrap; margin-block-top:0.65rem; padding-block-top:0.6rem; border-block-start:1px dashed var(--border-subtle);">
+          <button type="button" class="btn btn-outline btn-sm" data-view-contract="${escapeXml(o.id)}" data-unmasked="${isOwner ? 'true' : 'false'}">
+            📜 เปิดดู${escapeXml(contractMeta.shortLabel)}
+          </button>
+          <button type="button" class="btn btn-primary btn-sm" data-print-contract="${escapeXml(o.id)}" data-unmasked="${isOwner ? 'true' : 'false'}">
+            🖨️ พิมพ์สัญญา / บันทึก PDF
+          </button>
+        </div>
       </div>
     `;
   }).join('');
+
+  container.querySelectorAll('[data-view-contract]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-view-contract');
+      const unmasked = btn.getAttribute('data-unmasked') === 'true';
+      const ord = orders.find((o) => o.id === id) || state.orders.find((o) => o.id === id);
+      if (ord) openOrderContractModal(ord, { unmasked, isDraft: false });
+    });
+  });
+
+  container.querySelectorAll('[data-print-contract]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.getAttribute('data-print-contract');
+      const unmasked = btn.getAttribute('data-unmasked') === 'true';
+      const ord = orders.find((o) => o.id === id) || state.orders.find((o) => o.id === id);
+      if (ord) {
+        openOrderContractModal(ord, { unmasked, isDraft: false });
+        setTimeout(() => printActiveContract(), 150);
+      }
+    });
+  });
+}
+
+// ============================================================================
+// Automatic Electronic Rental & Sales Contract Engine
+// ============================================================================
+function getContractMetadata(order) {
+  const items = Array.isArray(order?.items) ? order.items : [];
+  const hasRent = items.some((i) => i.mode === 'rent');
+  const hasBuy = items.some((i) => i.mode !== 'rent');
+  const contractNo = order?.contractNo || ('CTR-' + (order?.id || 'DRAFT'));
+
+  let title = 'หนังสือสัญญาซื้อขายสินค้าและใบสำคัญรับเงินอิเล็กทรอนิกส์';
+  let subtitle = 'Electronic Sales Agreement & Official Payment Receipt';
+  let shortLabel = 'สัญญาซื้อขายสินค้า';
+  let typeBadge = 'สัญญาซื้อขายสินค้า (Sales Agreement)';
+
+  if (hasRent && hasBuy) {
+    title = 'หนังสือสัญญาเช่าแผ่นเกมรายวันและสัญญาซื้อขายสินค้าอิเล็กทรอนิกส์';
+    subtitle = 'Electronic Game Disc Rental & Merchandise Sales Agreement';
+    shortLabel = 'สัญญาเช่าและซื้อขาย';
+    typeBadge = 'สัญญาเช่าแผ่นเกม + ซื้อขายสินค้า';
+  } else if (hasRent) {
+    title = 'หนังสือสัญญาเช่าแผ่นเกมรายวันอิเล็กทรอนิกส์';
+    subtitle = 'Electronic Game Disc Daily Rental & Deposit Agreement';
+    shortLabel = 'สัญญาเช่าแผ่นเกม';
+    typeBadge = 'สัญญาเช่าแผ่นเกมรายวัน (Rental Agreement)';
+  }
+
+  return { contractNo, hasRent, hasBuy, title, subtitle, shortLabel, typeBadge };
+}
+
+function buildOrderContractHtml(order, options = { unmasked: true, isDraft: false }) {
+  const unmasked = options.unmasked !== false;
+  const isDraft = Boolean(options.isDraft);
+  const meta = getContractMetadata(order);
+
+  const rawName = order?.customer?.name || 'ลูกค้าผู้สั่งซื้อ (ระบุชื่อในฟอร์มชำระเงิน)';
+  const rawPhone = order?.customer?.phone || '-';
+  const rawLine = order?.customer?.lineId || '-';
+  const rawEmail = order?.customer?.email || order?.customerEmail || '-';
+  const rawAddress = order?.customer?.address || '-';
+
+  const custName = unmasked ? rawName : maskCustomerName(rawName);
+  const custPhone = unmasked ? rawPhone : maskPhone(rawPhone);
+  const custLine = unmasked ? rawLine : (rawLine !== '-' ? rawLine.slice(0, 2) + '***' : '-');
+  const custAddress = unmasked ? rawAddress : 'ปกปิดที่อยู่ตามนโยบายคุ้มครองข้อมูลส่วนบุคคล (PDPA)';
+
+  const items = Array.isArray(order?.items) ? order.items : [];
+  const rowsHtml = items.map((item, idx) => {
+    const isRent = item.mode === 'rent';
+    const typeText = isRent
+      ? `<strong style="color:#6d28d9;">💿 เช่ารายวัน (${Number(item.rentDays || 1)} วัน)</strong>`
+      : `<strong style="color:#0369a1;">🛒 ซื้อขาด</strong>`;
+    const periodText = isRent
+      ? `เริ่มเช่า: ${formatThaiDate(item.rentStartDate)}<br><strong>กำหนดส่งคืน: ${formatThaiDate(item.rentEndDate)}</strong>`
+      : `โอนกรรมสิทธิ์ถาวร`;
+    const amountText = isRent
+      ? `${formatTHB(Number(item.rentRate || 0) * Number(item.rentDays || 1) * Number(item.qty || 1))}<br><span style="font-size:0.75rem; color:#64748b;">(${formatTHB(item.rentRate)}/วัน × ${item.rentDays} วัน)</span>`
+      : `${formatTHB(Number(item.price || 0) * Number(item.qty || 1))}`;
+    const depositText = isRent
+      ? `<strong>${formatTHB(Number(item.deposit || 0) * Number(item.qty || 1))}</strong><br><span style="font-size:0.74rem; color:#059669;">(ได้รับคืน 100%)</span>`
+      : `-`;
+
+    return `
+      <tr>
+        <td style="text-align:center;">${idx + 1}</td>
+        <td>
+          <strong>${escapeXml(item.name)}</strong><br>
+          <span style="font-size:0.76rem; color:#475569;">แพลตฟอร์ม: ${escapeXml(item.platform || '-')}</span>
+        </td>
+        <td>${typeText}</td>
+        <td style="text-align:center;">${Number(item.qty || 1)}</td>
+        <td>${periodText}</td>
+        <td style="text-align:end;">${amountText}</td>
+        <td style="text-align:end;">${depositText}</td>
+      </tr>
+    `;
+  }).join('');
+
+  const rentalClausesHtml = meta.hasRent
+    ? `
+      <div class="contract-section-title">ข้อที่ 2: ข้อตกลงและเงื่อนไขการเช่าแผ่นเกมรายวัน (Rental Terms &amp; Conditions)</div>
+      <ol class="contract-clauses">
+        <li><strong>กรรมสิทธิ์ในทรัพย์สินที่เช่า:</strong> แผ่นเกมคอนโซลและกล่องบรรจุภัณฑ์ตามรายการเช่า ถือเป็นกรรมสิทธิ์ของ <strong>ร้าน TakeIT Gaming &amp; Console (ผู้ให้เช่า)</strong> ตลอดอายุสัญญา ผู้เช่ามีสิทธิ์ครอบครองเพื่อใช้เล่นเกมตามจำนวนวันที่ตกลงไว้เท่านั้น ห้ามนำไปจำหน่ายต่อ จำนำ ให้เช่าช่วง หรือดัดแปลงแก้ไขโดยเด็ดขาด</li>
+        <li><strong>การดูแลรักษาสภาพแผ่นเกม:</strong> ผู้เช่าตกลงจะดูแลรักษาแผ่นเกมและกล่องให้อยู่ในสภาพเรียบร้อย ไม่ให้เกิดรอยขีดข่วนลึก ไม่แตกร้าว ไม่บิดงอ และไม่ถูกความชื้นหรือความร้อนสูง</li>
+        <li><strong>กำหนดการส่งคืนและสิทธิ์ส่งคืนฟรี:</strong> ผู้เช่าต้องดำเนินการจัดส่งแผ่นเกมคืนให้แก่ผู้ให้เช่าภายใน <strong>วันครบกำหนดส่งคืน</strong> ที่ระบุไว้ในตารางข้อที่ 1 โดย <strong>ทางร้าน TakeIT เป็นผู้รับผิดชอบออกค่าใช้จ่ายในการจัดส่งพัสดุขากลับให้แก่ผู้เช่าทั้งหมด</strong></li>
+        <li><strong>การคืนเงินประกัน/ค่ามัดจำแผ่นเกม (100% Deposit Refund):</strong> เมื่อผู้ให้เช่าได้รับแผ่นเกมคืนและตรวจสอบแล้วว่าแผ่นเกมอยู่ในสภาพปกติ สามารถอ่านข้อมูลและใช้งานได้สมบูรณ์ ผู้ให้เช่าตกลงโอนเงินค่ามัดจำแผ่นเกมจำนวน <strong>${formatTHB(order?.depositSubtotal || 0)}</strong> คืนให้แก่ผู้เช่าเต็มจำนวน 100% ภายใน 24 ชั่วโมง</li>
+        <li><strong>กรณีส่งคืนล่าช้าหรือทรัพย์สินเสียหาย:</strong> หากผู้เช่ามีความประสงค์จะเช่าต่อ ต้องแจ้งผู้ให้เช่าล่วงหน้าก่อนครบกำหนด หากส่งคืนล่าช้าโดยไม่แจ้งล่วงหน้า ผู้เช่ายินยอมให้คิดค่าเช่าเพิ่มตามจำนวนวันที่ล่าช้าตามอัตราเช่ารายวันจริงโดยหักจากเงินมัดจำ และหากแผ่นเกมสูญหายหรือเสียหายจนไม่สามารถใช้งานได้ ผู้เช่ายินยอมให้ริบเงินมัดจำและชดใช้ตามมูลค่าสินค้าจริง</li>
+      </ol>
+    `
+    : '';
+
+  const salesClauseNum = meta.hasRent ? 'ข้อที่ 3' : 'ข้อที่ 2';
+  const sigClauseNum = meta.hasRent ? 'ข้อที่ 4' : 'ข้อที่ 3';
+
+  return `
+    <div class="contract-paper" id="printable-contract-paper">
+      <div class="contract-doc-header">
+        <div class="contract-doc-badge">
+          ${isDraft ? '📝 ร่างสัญญาตัวอย่างก่อนยืนยันคำสั่งซื้อ (DRAFT PREVIEW)' : 'TAKEIT GAMING & CONSOLE • OFFICIAL E-CONTRACT'}
+        </div>
+        <h3 class="contract-doc-title">${escapeXml(meta.title)}</h3>
+        <p class="contract-doc-subtitle">${escapeXml(meta.subtitle)} • ออกโดยระบบอัตโนมัติร้าน TakeIT Gaming &amp; Console</p>
+      </div>
+
+      <div class="contract-meta-grid">
+        <div>
+          <strong>เลขที่สัญญา (Contract No.):</strong><br>
+          <span style="color:#0284c7; font-weight:800; font-size:0.95rem;">${escapeXml(meta.contractNo)}</span>
+        </div>
+        <div>
+          <strong>อ้างอิงคำสั่งซื้อ (Order ID):</strong><br>
+          <span style="font-weight:700;">${escapeXml(order?.id || 'รอออกรหัสเมื่อกดยืนยัน')}</span>
+        </div>
+        <div>
+          <strong>วันที่ทำสัญญา (Date &amp; Time):</strong><br>
+          <span>${escapeXml(order?.createdAtFormatted || new Date().toLocaleString('th-TH'))}</span>
+        </div>
+        <div>
+          <strong>สถานะสัญญา (Status):</strong><br>
+          <span style="color:#059669; font-weight:700;">${isDraft ? 'ร่างสัญญา (รอยืนยันคำสั่งซื้อ)' : escapeXml(order?.status || 'มีผลผูกพันสมบูรณ์')}</span>
+        </div>
+      </div>
+
+      <div class="contract-parties-grid">
+        <div class="contract-party-card">
+          <h4>🏢 ฝ่ายที่ 1: ผู้ให้เช่า / ผู้ขาย (ร้านค้า)</h4>
+          <div><strong>ชื่อร้านค้า:</strong> ร้าน TakeIT Gaming &amp; Console</div>
+          <div><strong>ผู้แทน / บัญชีรับชำระ:</strong> ${escapeXml(state.settings.bankInfo || DEFAULT_SETTINGS.bankInfo)}</div>
+          <div><strong>อ้างอิงการรับชำระ:</strong> ${escapeXml(state.settings.promptPayId || DEFAULT_SETTINGS.promptPayId)}</div>
+          <div><strong>เว็บไซต์ทางการ:</strong> https://vidergroup124.github.io/takeit/</div>
+        </div>
+
+        <div class="contract-party-card">
+          <h4>👤 ฝ่ายที่ 2: ผู้เช่า / ผู้ซื้อ (ลูกค้า)</h4>
+          <div><strong>ชื่อ-นามสกุล:</strong> ${escapeXml(custName)}</div>
+          <div><strong>เบอร์โทรศัพท์ติดต่อ:</strong> ${escapeXml(custPhone)}</div>
+          <div><strong>LINE ID / อีเมล:</strong> ${escapeXml(custLine)}${rawEmail !== '-' ? ` (${escapeXml(rawEmail)})` : ''}</div>
+          <div><strong>ที่อยู่จัดส่งและรับ-คืนสินค้า:</strong> ${escapeXml(custAddress)}</div>
+        </div>
+      </div>
+
+      <div class="contract-section-title">ข้อที่ 1: รายการทรัพย์สินที่ตกลงเช่า / ซื้อขาย และสรุปยอดชำระเงิน</div>
+      <table class="contract-items-table">
+        <thead>
+          <tr>
+            <th style="inline-size:44px; text-align:center;">ลำดับ</th>
+            <th>รายการสินค้า / แผ่นเกม</th>
+            <th style="inline-size:125px;">ประเภทธุรกรรม</th>
+            <th style="inline-size:55px; text-align:center;">จำนวน</th>
+            <th style="inline-size:165px;">ระยะเวลาเช่า / กำหนดคืน</th>
+            <th style="inline-size:115px; text-align:end;">ค่าเช่า / ราคาซื้อ</th>
+            <th style="inline-size:110px; text-align:end;">เงินมัดจำแผ่น</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+      </table>
+
+      <div style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:8px; padding:0.75rem 1rem; margin-block-end:1rem; display:flex; justify-content:space-between; flex-wrap:wrap; gap:0.75rem; font-size:0.84rem;">
+        <div>
+          รวมค่าซื้อสินค้าขาด: <strong>${formatTHB(order?.buySubtotal || 0)}</strong> |
+          รวมค่าเช่าแผ่นเกม: <strong>${formatTHB(order?.rentSubtotal || 0)}</strong> |
+          รวมเงินมัดจำแผ่น (ได้รับคืน 100%): <strong style="color:#0284c7;">${formatTHB(order?.depositSubtotal || 0)}</strong> |
+          ค่าจัดส่งด่วน: <strong>${formatTHB(order?.shippingFee ?? 60)}</strong>
+        </div>
+        <div style="font-size:0.98rem; font-weight:800; color:#059669;">
+          รวมยอดชำระสุทธิทั้งสิ้น: ${formatTHB(order?.grandTotal || 0)}
+        </div>
+      </div>
+
+      ${rentalClausesHtml}
+
+      <div class="contract-section-title">${salesClauseNum}: ข้อตกลงการซื้อขาย การจัดส่ง และการรับประกันสินค้า</div>
+      <ol class="contract-clauses">
+        <li>สำหรับรายการสินค้าประเภท <strong>ซื้อขาด</strong> กรรมสิทธิ์ในสินค้าจะโอนไปยังผู้ซื้อเมื่อผู้ขายได้รับชำระเงินครบถ้วนและตรวจสอบหลักฐานการโอนเงินถูกต้องแล้ว</li>
+        <li>ผู้ขายรับประกันว่าสินค้าและแผ่นเกมทุกรายการเป็นของแท้ และผ่านการตรวจสอบคุณภาพพร้อมบรรจุกันกระแทกอย่างดีก่อนจัดส่งให้แก่ลูกค้า</li>
+        <li>คู่สัญญาทั้งสองฝ่ายตกลงให้เอกสารสัญญาอิเล็กทรอนิกส์ฉบับนี้ ซึ่งสร้างขึ้นโดยอัตโนมัติตามคำสั่งซื้อรหัส <strong>${escapeXml(order?.id || 'DRAFT')}</strong> มีผลผูกพันตามกฎหมายว่าด้วยธุรกรรมทางอิเล็กทรอนิกส์ทุกประการ</li>
+      </ol>
+
+      <div class="contract-section-title">${sigClauseNum}: การลงลายมือชื่ออิเล็กทรอนิกส์ของคู่สัญญา (Electronic Signatures)</div>
+      <div class="contract-signatures-grid">
+        <div class="contract-sig-box">
+          <div style="font-weight:700; color:#0f172a;">ลงชื่อ ผู้เช่า / ผู้ซื้อ (Customer)</div>
+          <div class="contract-sig-name">${escapeXml(custName)}</div>
+          <div style="color:#475569;">(${escapeXml(custName)})</div>
+          <div style="font-size:0.75rem; color:#059669; margin-block-top:0.25rem;">
+            ✅ ยืนยันทำสัญญาทางอิเล็กทรอนิกส์เมื่อ ${escapeXml(order?.createdAtFormatted || new Date().toLocaleString('th-TH'))}
+          </div>
+        </div>
+
+        <div class="contract-sig-box">
+          <div style="font-weight:700; color:#0f172a;">ลงชื่อ ผู้ให้เช่า / ผู้ขาย (Store Official)</div>
+          <div class="contract-official-stamp">TAKEIT GAMING &amp; CONSOLE VERIFIED</div>
+          <div style="color:#0f172a; font-weight:700;">นาย ภาณุเดช พุทธบัวงาม</div>
+          <div style="font-size:0.75rem; color:#475569;">ผู้มีอำนาจลงนาม • ร้าน TakeIT Gaming &amp; Console</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function buildOrderContractPlainText(order, unmasked = true) {
+  const meta = getContractMetadata(order);
+  const custName = unmasked ? (order?.customer?.name || '-') : maskCustomerName(order?.customer?.name);
+  const custPhone = unmasked ? (order?.customer?.phone || '-') : maskPhone(order?.customer?.phone);
+  const custAddress = unmasked ? (order?.customer?.address || '-') : 'ปกปิดตาม PDPA';
+
+  const itemLines = (order?.items || []).map((item, idx) => {
+    if (item.mode === 'rent') {
+      return `${idx + 1}. [เช่าแผ่น ${item.rentDays} วัน] ${item.name} (${item.platform}) x${item.qty} | ค่าเช่า ${formatTHB(item.rentRate * item.rentDays * item.qty)} + มัดจำแผ่น ${formatTHB(item.deposit * item.qty)} | เริ่มเช่า: ${formatThaiDate(item.rentStartDate)} -> กำหนดส่งคืน: ${formatThaiDate(item.rentEndDate)}`;
+    }
+    return `${idx + 1}. [ซื้อขาด] ${item.name} (${item.platform}) x${item.qty} | ราคา ${formatTHB(item.price * item.qty)}`;
+  }).join('\n');
+
+  return [
+    `📜 ${meta.title}`,
+    `ร้าน TakeIT Gaming & Console (https://vidergroup124.github.io/takeit/)`,
+    `================================================`,
+    `เลขที่สัญญา: ${meta.contractNo}`,
+    `อ้างอิงรหัสคำสั่งซื้อ: ${order?.id || 'DRAFT'}`,
+    `วันที่ทำสัญญา: ${order?.createdAtFormatted || new Date().toLocaleString('th-TH')}`,
+    `ผู้เช่า/ผู้ซื้อ: ${custName} (โทร: ${custPhone})`,
+    `ที่อยู่จัดส่ง: ${custAddress}`,
+    `------------------------------------------------`,
+    `รายการสินค้า/แผ่นเกมตามสัญญา:`,
+    itemLines,
+    `------------------------------------------------`,
+    `รวมค่าซื้อสินค้า: ${formatTHB(order?.buySubtotal || 0)}`,
+    `รวมค่าเช่าแผ่นเกม: ${formatTHB(order?.rentSubtotal || 0)}`,
+    `รวมเงินมัดจำแผ่นเกม (ได้รับคืน 100% เมื่อคืนแผ่นปกติ): ${formatTHB(order?.depositSubtotal || 0)}`,
+    `ค่าจัดส่งด่วน: ${formatTHB(order?.shippingFee ?? 60)}`,
+    `รวมยอดชำระสุทธิทั้งสิ้น: ${formatTHB(order?.grandTotal || 0)}`,
+    `------------------------------------------------`,
+    `เงื่อนไขสำคัญ: ทางร้านออกค่าส่งแผ่นขากลับให้ฟรี และโอนคืนเงินมัดจำเต็มจำนวน 100% ภายใน 24 ชม. หลังได้รับแผ่นคืนในสภาพปกติ`,
+    `ลงชื่ออิเล็กทรอนิกส์ผู้เช่า/ผู้ซื้อ: ${custName}`,
+    `ลงชื่อผู้ให้เช่า/ผู้ขาย: ร้าน TakeIT Gaming & Console (นาย ภาณุเดช พุทธบัวงาม)`
+  ].join('\n');
+}
+
+function openOrderContractModal(order, options = { unmasked: true, isDraft: false }) {
+  if (!order) return;
+  state.activeContractOrder = order;
+  state.activeContractOptions = options;
+
+  const meta = getContractMetadata(order);
+  const titleEl = document.getElementById('contract-dialog-title');
+  const bodyEl = document.getElementById('contract-dialog-body');
+  const dlg = document.getElementById('dialog-contract');
+  if (!bodyEl || !dlg) return;
+
+  if (titleEl) {
+    titleEl.textContent = `📜 ${meta.shortLabel} (${meta.contractNo})`;
+  }
+  bodyEl.innerHTML = buildOrderContractHtml(order, options);
+  dlg.showModal();
+}
+
+function openDraftContractFromCart() {
+  if (state.cart.length === 0) {
+    showToast('กรุณาเลือกสินค้าหรือแผ่นเกมเข้าตะกร้าก่อนดูตัวอย่างสัญญาครับ', 'warning');
+    return;
+  }
+  const totals = calculateCartTotals();
+  const now = new Date();
+  const draftOrder = {
+    id: 'DRAFT-PREVIEW',
+    contractNo: 'CTR-DRAFT-' + now.toISOString().slice(2, 10).replace(/-/g, ''),
+    createdAt: now.toISOString(),
+    createdAtFormatted: now.toLocaleString('th-TH'),
+    customer: {
+      name: document.getElementById('cust-name')?.value.trim() || state.currentUser?.displayName || 'ระบุชื่อ-นามสกุลผู้ทำสัญญาในหน้าชำระเงิน',
+      phone: document.getElementById('cust-phone')?.value.trim() || 'ระบุเบอร์โทรศัพท์ในหน้าชำระเงิน',
+      lineId: document.getElementById('cust-line')?.value.trim() || '-',
+      address: document.getElementById('cust-address')?.value.trim() || 'ระบุที่อยู่จัดส่งในหน้าชำระเงิน',
+      email: state.currentUser?.email || ''
+    },
+    items: [...state.cart],
+    buySubtotal: totals.buySubtotal,
+    rentSubtotal: totals.rentSubtotal,
+    depositSubtotal: totals.depositSubtotal,
+    shippingFee: totals.shippingFee,
+    grandTotal: totals.grandTotal,
+    status: 'ร่างสัญญาตัวอย่างก่อนยืนยันคำสั่งซื้อ'
+  };
+  openOrderContractModal(draftOrder, { unmasked: true, isDraft: true });
+}
+
+function buildStandaloneContractDocumentHtml(order, options = { unmasked: true, isDraft: false }) {
+  const meta = getContractMetadata(order);
+  const contractBodyHtml = buildOrderContractHtml(order, options);
+  return `<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeXml(meta.title)} - ${escapeXml(meta.contractNo)}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 20px;
+      background: #f1f5f9;
+      color: #0f172a;
+      font-family: 'Prompt', sans-serif;
+    }
+    .contract-paper {
+      max-width: 820px;
+      margin: 0 auto;
+      background: #ffffff;
+      color: #0f172a;
+      padding: 28px 32px;
+      border-radius: 12px;
+      border: 2px solid #cbd5e1;
+      line-height: 1.6;
+      font-size: 13.5px;
+    }
+    .contract-doc-header {
+      text-align: center;
+      border-bottom: 2px solid #0f172a;
+      padding-bottom: 12px;
+      margin-bottom: 14px;
+    }
+    .contract-doc-badge {
+      display: inline-block;
+      background: #0f172a;
+      color: #38bdf8;
+      font-weight: 800;
+      font-size: 11px;
+      padding: 3px 12px;
+      border-radius: 999px;
+      margin-bottom: 6px;
+    }
+    .contract-doc-title { margin: 0 0 4px; font-size: 19px; font-weight: 800; }
+    .contract-doc-subtitle { margin: 0; font-size: 12px; color: #475569; }
+    .contract-meta-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 14px;
+      font-size: 12.5px;
+    }
+    .contract-parties-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .contract-party-card {
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 12.5px;
+    }
+    .contract-party-card h4 {
+      margin: 0 0 6px;
+      font-size: 13.5px;
+      border-bottom: 1px dashed #cbd5e1;
+      padding-bottom: 4px;
+    }
+    .contract-section-title {
+      margin: 14px 0 8px;
+      font-size: 13.5px;
+      font-weight: 800;
+      background: #f1f5f9;
+      padding: 5px 10px;
+      border-left: 4px solid #0284c7;
+    }
+    .contract-items-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      margin-bottom: 10px;
+    }
+    .contract-items-table th, .contract-items-table td {
+      border: 1px solid #cbd5e1;
+      padding: 6px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    .contract-items-table thead th {
+      background: #0f172a;
+      color: #ffffff;
+    }
+    .contract-clauses {
+      margin: 0 0 12px;
+      padding-left: 18px;
+      font-size: 12px;
+    }
+    .contract-clauses li { margin-bottom: 4px; }
+    .contract-signatures-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-top: 16px;
+      padding-top: 12px;
+      border-top: 2px dashed #cbd5e1;
+    }
+    .contract-sig-box {
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 10px;
+      text-align: center;
+      background: #f8fafc;
+      font-size: 12px;
+    }
+    .contract-sig-name {
+      font-size: 15px;
+      font-weight: 800;
+      color: #0284c7;
+      padding: 4px 10px;
+      margin: 4px auto;
+      display: inline-block;
+      border-bottom: 2px solid #94a3b8;
+    }
+    .contract-official-stamp {
+      display: inline-block;
+      border: 2px solid #0284c7;
+      color: #0284c7;
+      padding: 3px 10px;
+      border-radius: 6px;
+      font-weight: 800;
+      font-size: 11px;
+      margin: 4px 0;
+    }
+    @media print {
+      body { background: #ffffff; padding: 0; }
+      .contract-paper { border: none; padding: 0; max-width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  ${contractBodyHtml}
+</body>
+</html>`;
+}
+
+function printActiveContract() {
+  const order = state.activeContractOrder;
+  if (!order) return;
+  const fullHtml = buildStandaloneContractDocumentHtml(order, state.activeContractOptions || { unmasked: true });
+  const printWin = window.open('', '_blank', 'width=900,height=800');
+  if (printWin) {
+    printWin.document.open();
+    printWin.document.write(fullHtml);
+    printWin.document.close();
+    printWin.focus();
+    setTimeout(() => {
+      printWin.print();
+    }, 350);
+  } else {
+    window.print();
+  }
+}
+
+function downloadActiveContractHtml() {
+  const order = state.activeContractOrder;
+  if (!order) return;
+  const meta = getContractMetadata(order);
+  const fullHtml = buildStandaloneContractDocumentHtml(order, state.activeContractOptions || { unmasked: true });
+  const blob = new Blob([fullHtml], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `TakeIT-Contract-${meta.contractNo}.html`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  showToast(`💾 ดาวน์โหลดไฟล์สัญญา ${meta.contractNo}.html เรียบร้อยแล้ว!`);
+}
+
+async function copyActiveContractText() {
+  const order = state.activeContractOrder;
+  if (!order) return;
+  const unmasked = state.activeContractOptions?.unmasked !== false;
+  const text = buildOrderContractPlainText(order, unmasked);
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast('📋 คัดลอกข้อความสัญญาเช่า/ซื้อขายเรียบร้อยแล้ว! สามารถนำไปวางส่งในแชตได้เลย');
+  } catch (err) {
+    showToast('⚠️ ไม่สามารถคัดลอกอัตโนมัติได้ กรุณากดพิมพ์หรือดาวน์โหลดไฟล์แทนครับ', 'warning');
+  }
 }
