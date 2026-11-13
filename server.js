@@ -18,7 +18,7 @@ function readDb() {
   } catch (err) {
     console.error('Error reading DB:', err.message);
   }
-  return { products: null, orders: [], settings: null };
+  return { products: null, orders: [], settings: null, supportTickets: [] };
 }
 
 function writeDb(data) {
@@ -83,6 +83,7 @@ const server = http.createServer((req, res) => {
         const updated = {
           products: incoming.products !== undefined ? incoming.products : current.products,
           orders: incoming.orders !== undefined ? incoming.orders : current.orders,
+          supportTickets: incoming.supportTickets !== undefined ? incoming.supportTickets : (current.supportTickets || []),
           settings: incoming.settings !== undefined ? incoming.settings : current.settings,
           updatedAt: new Date().toISOString()
         };

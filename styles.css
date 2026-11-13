@@ -1898,4 +1898,129 @@ table.data-table tbody tr:hover th {
   }
 }
 
+/* ==========================================================================
+   Customer Support & Product Wishlist System Styles
+   ========================================================================== */
+.support-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 1.15rem 1.25rem;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.support-card:hover {
+  border-color: rgba(56, 189, 248, 0.45);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.support-card.card-type-wishlist {
+  border-left: 4px solid var(--accent-cyan);
+}
+
+.support-card.card-type-issue {
+  border-left: 4px solid var(--accent-rose);
+}
+
+.support-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-block-end: 0.85rem;
+  padding-block-end: 0.65rem;
+  border-block-end: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.support-card-title {
+  margin: 0 0 0.35rem;
+  font-size: 1.08rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.support-card-details {
+  background: rgba(15, 23, 42, 0.6);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem 0.95rem;
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  margin-block-end: 0.85rem;
+  white-space: pre-line;
+}
+
+.contact-pill-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-block-end: 0.85rem;
+}
+
+.contact-link-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.32rem 0.75rem;
+  border-radius: var(--radius-full);
+  background: rgba(30, 41, 59, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+
+.contact-link-pill:hover {
+  background: var(--accent-cyan);
+  color: #040812;
+  border-color: transparent;
+  transform: translateY(-1px);
+}
+
+.contact-link-pill.pill-line:hover {
+  background: #06c755;
+  color: #fff;
+}
+
+.contact-link-pill.pill-phone:hover {
+  background: #10b981;
+  color: #fff;
+}
+
+.support-admin-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  background: rgba(7, 11, 20, 0.4);
+  padding: 0.75rem 0.95rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.support-thumb-img {
+  inline-size: 90px;
+  block-size: 70px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.support-thumb-img:hover {
+  transform: scale(1.05);
+  border-color: var(--accent-cyan);
+}
+
+
 

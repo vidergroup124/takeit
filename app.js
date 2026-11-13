@@ -17,7 +17,9 @@ const STORAGE_KEYS = {
   ORDERS: 'takeit_orders_v1',
   SETTINGS: 'takeit_settings_v1',
   CART: 'takeit_cart_v1',
-  ADMIN_SESSION: 'takeit_admin_session_v1'
+  ADMIN_SESSION: 'takeit_admin_session_v1',
+  SUPPORT: 'takeit_support_v1',
+  SAVED_CONTACT: 'takeit_saved_contact_v1'
 };
 
 // High-reliability SVG Data URI generator for crisp gamer product art out of the box
@@ -307,6 +309,7 @@ const DEFAULT_PRODUCTS = [
 let state = {
   products: [],
   orders: [],
+  supportTickets: [],
   settings: { ...DEFAULT_SETTINGS },
   cart: [],
   isAdmin: false,
@@ -315,6 +318,7 @@ let state = {
   activeMode: 'all',
   searchQuery: '',
   pendingSlipDataUrl: '',
+  pendingIssueImageDataUrl: '',
   editingProductImages: [],
   firestoreDb: null,
   firebaseModules: null,
@@ -549,6 +553,12 @@ async function loadInitialData() {
     if (savedCart) {
       state.cart = JSON.parse(savedCart);
     }
+    const savedSupport = localStorage.getItem(STORAGE_KEYS.SUPPORT);
+    if (savedSupport) {
+      try {
+        state.supportTickets = JSON.parse(savedSupport);
+      } catch (e) {}
+    }
     state.isAdmin = sessionStorage.getItem(STORAGE_KEYS.ADMIN_SESSION) === 'true';
   } catch (err) {
     console.warn('Local storage read warning:', err);
@@ -599,6 +609,7 @@ function saveStateLocally() {
     localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(state.orders));
     localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(state.settings));
     localStorage.setItem(STORAGE_KEYS.CART, JSON.stringify(state.cart));
+    localStorage.setItem(STORAGE_KEYS.SUPPORT, JSON.stringify(state.supportTickets));
   } catch (err) {
     console.warn('LocalStorage quota warning:', err);
   }
@@ -610,6 +621,7 @@ function saveStateLocally() {
     body: JSON.stringify({
       products: state.products,
       orders: state.orders,
+      supportTickets: state.supportTickets,
       settings: state.settings
     })
   }).catch(() => {});
@@ -705,7 +717,36 @@ async function initCloudConnection() {
         state.orders = mergedOrders;
       }
 
-      // 3. Real-time listeners so any product or order added on one device appears on all other devices automatically
+      // 3. Initial fetch & merge of support tickets / product requests from Firestore
+      try {
+        const supportSnap = await fsMod.getDocs(fsMod.collection(db, 'takeit_support'));
+        const supportMap = new Map();
+        if (!supportSnap.empty) {
+          supportSnap.forEach((docSnap) => {
+            const d = docSnap.data();
+            if (d && d.id) supportMap.set(d.id, d);
+          });
+        }
+        for (const localTkt of (state.supportTickets || [])) {
+          if (!localTkt || !localTkt.id) continue;
+          const cloudTkt = supportMap.get(localTkt.id);
+          const localTime = Number(localTkt.updatedAtMs || 0);
+          const cloudTime = Number(cloudTkt?.updatedAtMs || 0);
+          if (!cloudTkt || localTime > cloudTime) {
+            supportMap.set(localTkt.id, localTkt);
+            fsMod.setDoc(fsMod.doc(db, 'takeit_support', localTkt.id), localTkt).catch(() => {});
+          }
+        }
+        if (supportMap.size > 0) {
+          const mergedTickets = Array.from(supportMap.values()).filter((t) => !t.isDeleted);
+          mergedTickets.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+          state.supportTickets = mergedTickets;
+        }
+      } catch (err) {
+        console.warn('Initial support tickets fetch skipped/warning:', err);
+      }
+
+      // 4. Real-time listeners so any product or order added on one device appears on all other devices automatically
       if (!state.unsubscribeFirestore) {
         const unsubProd = fsMod.onSnapshot(fsMod.collection(db, 'takeit_products'), (snap) => {
           if (snap.empty) return;
@@ -755,9 +796,32 @@ async function initCloudConnection() {
           }
         });
 
+        const unsubSupport = fsMod.onSnapshot(fsMod.collection(db, 'takeit_support'), (snap) => {
+          const localMap = new Map((state.supportTickets || []).map((t) => [t.id, t]));
+          const liveTickets = [];
+          snap.forEach((d) => {
+            const cloudTkt = d.data();
+            const localTkt = localMap.get(cloudTkt.id);
+            const picked = (localTkt && Number(localTkt.updatedAtMs || 0) > Number(cloudTkt.updatedAtMs || 0))
+              ? localTkt
+              : cloudTkt;
+            if (!picked.isDeleted) {
+              liveTickets.push(picked);
+            }
+          });
+          liveTickets.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+          state.supportTickets = liveTickets;
+          saveStateLocally();
+          updateSupportBadgeCount();
+          if (state.isAdmin) {
+            renderAdminSupportTicketsTable();
+          }
+        });
+
         state.unsubscribeFirestore = () => {
           unsubProd();
           unsubOrd();
+          unsubSupport();
         };
       }
 
@@ -1454,10 +1518,12 @@ function renderAll() {
   renderCartBadge();
   renderAdminVisibility();
   renderCustomerAuthUI();
+  updateSupportBadgeCount();
   if (state.isAdmin) {
     renderAdminStats();
     renderAdminOrdersTable();
     renderAdminProductsTable();
+    renderAdminSupportTicketsTable();
     populateSettingsForm();
   }
 }
@@ -1481,13 +1547,22 @@ function renderStorefront() {
   });
 
   if (filtered.length === 0) {
+    const rawSearch = state.searchQuery.trim();
     grid.innerHTML = `
-      <div style="grid-column: 1 / -1; text-align:center; padding:3rem 1rem; background:var(--bg-surface); border-radius:var(--radius-md); border:1px solid var(--border-subtle);">
-        <div style="font-size:2.5rem; margin-block-end:0.5rem;">🔍</div>
-        <h3 style="margin:0 0 0.4rem;">ไม่พบสินค้าที่ตรงกับตัวกรอง</h3>
-        <p style="color:var(--text-muted); margin:0;">ลองเปลี่ยนหมวดหมู่ หรือค้นหาด้วยคำอื่นดูครับ</p>
+      <div style="grid-column: 1 / -1; text-align:center; padding:3rem 1.5rem; background:var(--bg-surface); border-radius:var(--radius-md); border:1px solid var(--border-subtle);">
+        <div style="font-size:2.8rem; margin-block-end:0.5rem;">🎮</div>
+        <h3 style="margin:0 0 0.4rem; color:var(--text-primary);">ไม่พบสินค้าที่ตรงกับการค้นหา ${rawSearch ? `"${escapeXml(rawSearch)}"` : ''}</h3>
+        <p style="color:var(--text-muted); margin:0 0 1.25rem; font-size:0.92rem; max-inline-size:520px; margin-inline:auto;">
+          ร้าน TakeIT ยังไม่มีสินค้าหรือแผ่นเกมที่คุณกำลังตามหาอยู่ใช่ไหม? กดส่งชื่อสินค้าที่คุณอยากได้ด้านล่าง ทางร้านจะจัดหาและติดต่อกลับทันที!
+        </p>
+        <button type="button" class="btn btn-primary" id="btn-empty-request-product" style="font-size:0.92rem; padding:0.6rem 1.25rem;">
+          💡 ส่งคำขอให้ร้าน TakeIT จัดหาให้ (ระบุช่องทางติดต่อกลับ)
+        </button>
       </div>
     `;
+    document.getElementById('btn-empty-request-product')?.addEventListener('click', () => {
+      openSupportModal('wishlist', rawSearch);
+    });
     return;
   }
 
@@ -2451,6 +2526,8 @@ function switchAdminTab(tabName) {
   document.getElementById('admin-tab-orders').hidden = tabName !== 'orders';
   document.getElementById('admin-tab-products').hidden = tabName !== 'products';
   document.getElementById('admin-tab-settings').hidden = tabName !== 'settings';
+  const supTab = document.getElementById('admin-tab-support');
+  if (supTab) supTab.hidden = tabName !== 'support';
 }
 
 function openInfoViewerModal(title, bodyHtml) {
@@ -3138,6 +3215,204 @@ document.addEventListener('DOMContentLoaded', () => {
     renderAll();
     showToast('🔄 รีเซ็ตรายการสินค้าตัวอย่างเริ่มต้นเรียบร้อยแล้ว');
   });
+
+  // Customer Support & Product Wishlist interactions
+  document.getElementById('btn-open-support')?.addEventListener('click', () => openSupportModal('wishlist'));
+  document.getElementById('btn-banner-request-product')?.addEventListener('click', () => openSupportModal('wishlist'));
+  document.getElementById('btn-footer-open-support')?.addEventListener('click', () => openSupportModal('issue'));
+  document.getElementById('btn-footer-request-item')?.addEventListener('click', () => openSupportModal('wishlist'));
+
+  document.getElementById('btn-tab-modal-wishlist')?.addEventListener('click', () => {
+    document.getElementById('btn-tab-modal-wishlist')?.classList.add('active');
+    document.getElementById('btn-tab-modal-issue')?.classList.remove('active');
+    const pw = document.getElementById('pane-modal-wishlist');
+    const pi = document.getElementById('pane-modal-issue');
+    if (pw) pw.hidden = false;
+    if (pi) pi.hidden = true;
+  });
+
+  document.getElementById('btn-tab-modal-issue')?.addEventListener('click', () => {
+    document.getElementById('btn-tab-modal-issue')?.classList.add('active');
+    document.getElementById('btn-tab-modal-wishlist')?.classList.remove('active');
+    const pw = document.getElementById('pane-modal-wishlist');
+    const pi = document.getElementById('pane-modal-issue');
+    if (pw) pw.hidden = true;
+    if (pi) pi.hidden = false;
+  });
+
+  // Issue screenshot file upload
+  document.getElementById('issue-image-file')?.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      showToast('⏳ กำลังประมวลผลรูปภาพ...');
+      let fileToCompress = file;
+      if (isHeicFile(file)) {
+        fileToCompress = await convertHeicToJpegBlob(file);
+      }
+      const dataUrl = await compressImageFileToDataUrl(fileToCompress, 1200, 0.85);
+      state.pendingIssueImageDataUrl = dataUrl;
+      const previewImg = document.getElementById('issue-image-preview');
+      const previewWrap = document.getElementById('issue-image-preview-wrap');
+      if (previewImg && previewWrap) {
+        previewImg.src = dataUrl;
+        previewWrap.style.display = 'flex';
+      }
+      showToast('📷 แนบรูปภาพประกอบปัญหาเรียบร้อยแล้ว');
+    } catch (err) {
+      console.error('Issue image process error:', err);
+      showToast('⚠️ ไม่สามารถอ่านไฟล์รูปนี้ได้ กรุณาลองใช้รูป JPG หรือ PNG', 'warning');
+    }
+  });
+
+  document.getElementById('btn-remove-issue-image')?.addEventListener('click', () => {
+    state.pendingIssueImageDataUrl = '';
+    const fileInput = document.getElementById('issue-image-file');
+    if (fileInput) fileInput.value = '';
+    const previewWrap = document.getElementById('issue-image-preview-wrap');
+    if (previewWrap) previewWrap.style.display = 'none';
+  });
+
+  // Submit Product Wishlist / Request Form
+  document.getElementById('form-request-product')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const prodName = document.getElementById('req-prod-name')?.value.trim();
+    const platform = document.getElementById('req-prod-platform')?.value;
+    const intent = document.getElementById('req-prod-intent')?.value;
+    const details = document.getElementById('req-prod-details')?.value.trim();
+    const custName = document.getElementById('req-cust-name')?.value.trim();
+    const custPhone = document.getElementById('req-cust-phone')?.value.trim();
+    const custLine = document.getElementById('req-cust-line')?.value.trim();
+    const custEmail = document.getElementById('req-cust-email')?.value.trim();
+
+    if (!prodName || !custName || !custPhone || !custLine) {
+      showToast('⚠️ กรุณากรอกข้อมูลที่จำเป็นให้ครบถ้วนครับ', 'warning');
+      return;
+    }
+
+    const now = new Date();
+    const ticketId = `REQ-${Date.now().toString(36).toUpperCase()}`;
+    const newTicket = {
+      id: ticketId,
+      type: 'wishlist',
+      title: prodName,
+      category: platform,
+      intent: intent,
+      intentLabel: intent,
+      details: details,
+      customerName: custName,
+      phone: custPhone,
+      lineId: custLine,
+      email: custEmail,
+      orderId: '',
+      screenshotDataUrl: '',
+      status: 'pending',
+      statusLabel: 'รอแอดมินติดต่อกลับ',
+      adminNote: '',
+      createdAt: now.toISOString(),
+      createdAtThai: now.toLocaleString('th-TH'),
+      updatedAtMs: now.getTime(),
+      customerUid: state.currentUser?.uid || ''
+    };
+
+    // Save contact locally for autofill next time
+    try {
+      localStorage.setItem(STORAGE_KEYS.SAVED_CONTACT, JSON.stringify({
+        name: custName,
+        phone: custPhone,
+        lineId: custLine,
+        email: custEmail
+      }));
+    } catch (err) {}
+
+    state.supportTickets.unshift(newTicket);
+    saveStateLocally();
+    await saveSupportTicketToCloud(newTicket);
+    await sendSupportTicketToGoogleSheet(newTicket, 'submit_support_ticket');
+
+    document.getElementById('dialog-support-request')?.close();
+    e.target.reset();
+    updateSupportBadgeCount();
+    if (state.isAdmin) renderAdminSupportTicketsTable();
+
+    showToast(`🎉 ส่งคำขอสินค้า "${prodName}" เรียบร้อยแล้ว! (รหัสรายการ: ${ticketId}) ทางร้านจะรีบติดต่อกลับครับ`);
+  });
+
+  // Submit Issue Report Form
+  document.getElementById('form-report-issue')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const category = document.getElementById('issue-category')?.value;
+    const orderId = document.getElementById('issue-order-id')?.value.trim();
+    const details = document.getElementById('issue-details')?.value.trim();
+    const custName = document.getElementById('issue-cust-name')?.value.trim();
+    const custPhone = document.getElementById('issue-cust-phone')?.value.trim();
+    const custLine = document.getElementById('issue-cust-line')?.value.trim();
+    const custEmail = document.getElementById('issue-cust-email')?.value.trim();
+
+    if (!details || !custName || !custPhone || !custLine) {
+      showToast('⚠️ กรุณากรอกข้อมูลและรายละเอียดปัญหาให้ครบถ้วนครับ', 'warning');
+      return;
+    }
+
+    const now = new Date();
+    const ticketId = `TKT-${Date.now().toString(36).toUpperCase()}`;
+    const newTicket = {
+      id: ticketId,
+      type: 'issue',
+      title: `[แจ้งปัญหา] ${category}`,
+      category: category,
+      intent: '',
+      intentLabel: '-',
+      details: details,
+      orderId: orderId,
+      customerName: custName,
+      phone: custPhone,
+      lineId: custLine,
+      email: custEmail,
+      screenshotDataUrl: state.pendingIssueImageDataUrl || '',
+      status: 'pending',
+      statusLabel: 'รอแอดมินติดต่อกลับ',
+      adminNote: '',
+      createdAt: now.toISOString(),
+      createdAtThai: now.toLocaleString('th-TH'),
+      updatedAtMs: now.getTime(),
+      customerUid: state.currentUser?.uid || ''
+    };
+
+    // Save contact locally for autofill next time
+    try {
+      localStorage.setItem(STORAGE_KEYS.SAVED_CONTACT, JSON.stringify({
+        name: custName,
+        phone: custPhone,
+        lineId: custLine,
+        email: custEmail
+      }));
+    } catch (err) {}
+
+    state.supportTickets.unshift(newTicket);
+    saveStateLocally();
+    await saveSupportTicketToCloud(newTicket);
+    await sendSupportTicketToGoogleSheet(newTicket, 'submit_support_ticket');
+
+    state.pendingIssueImageDataUrl = '';
+    const fileInput = document.getElementById('issue-image-file');
+    if (fileInput) fileInput.value = '';
+    const previewWrap = document.getElementById('issue-image-preview-wrap');
+    if (previewWrap) previewWrap.style.display = 'none';
+
+    document.getElementById('dialog-support-request')?.close();
+    e.target.reset();
+    updateSupportBadgeCount();
+    if (state.isAdmin) renderAdminSupportTicketsTable();
+
+    showToast(`📨 ส่งแจ้งปัญหาเรียบร้อยแล้ว! (รหัสรายการ: ${ticketId}) เจ้าหน้าที่จะรีบติดต่อกลับเพื่อดูแลให้ครับ`);
+  });
+
+  // Admin Support Filters & Actions
+  document.getElementById('admin-support-filter-type')?.addEventListener('change', renderAdminSupportTicketsTable);
+  document.getElementById('admin-support-filter-status')?.addEventListener('change', renderAdminSupportTicketsTable);
+  document.getElementById('btn-export-support-csv')?.addEventListener('click', exportSupportTicketsToCsv);
+  document.getElementById('btn-sync-support-sheet')?.addEventListener('click', syncAllSupportTicketsToGoogleSheet);
 });
 
 function refreshOpenOrderLookupModal() {
@@ -3840,5 +4115,423 @@ async function copyActiveContractText() {
     showToast('📋 คัดลอกข้อความสัญญาเช่า/ซื้อขายเรียบร้อยแล้ว! สามารถนำไปวางส่งในแชตได้เลย');
   } catch (err) {
     showToast('⚠️ ไม่สามารถคัดลอกอัตโนมัติได้ กรุณากดพิมพ์หรือดาวน์โหลดไฟล์แทนครับ', 'warning');
+  }
+}
+
+// ============================================================================
+// Customer Support & Product Wishlist Engine
+// ============================================================================
+async function saveSupportTicketToCloud(ticket) {
+  if (state.firestoreDb && state.firebaseModules) {
+    try {
+      const { setDoc, doc } = state.firebaseModules;
+      await setDoc(doc(state.firestoreDb, 'takeit_support', ticket.id), ticket);
+    } catch (err) {
+      console.warn('Firebase save support ticket error:', err);
+    }
+  }
+}
+
+async function deleteSupportTicketFromCloud(ticketId) {
+  if (state.firestoreDb && state.firebaseModules) {
+    try {
+      const { deleteDoc, doc } = state.firebaseModules;
+      await deleteDoc(doc(state.firestoreDb, 'takeit_support', ticketId));
+    } catch (err) {
+      console.warn('Firebase delete support ticket error:', err);
+    }
+  }
+}
+
+async function sendSupportTicketToGoogleSheet(ticket, action = 'submit_support_ticket') {
+  const webhookUrl = (state.settings.sheetWebhookUrl || '').trim();
+  if (!webhookUrl || !webhookUrl.startsWith('http')) return false;
+  return postPayloadToGoogleSheet(webhookUrl, {
+    action,
+    ticket
+  });
+}
+
+async function deleteSupportTicketFromGoogleSheet(ticketId) {
+  const webhookUrl = (state.settings.sheetWebhookUrl || '').trim();
+  if (!webhookUrl || !webhookUrl.startsWith('http')) return false;
+  return postPayloadToGoogleSheet(webhookUrl, {
+    action: 'delete_support_ticket',
+    ticketId
+  });
+}
+
+function updateSupportBadgeCount() {
+  const badge = document.getElementById('admin-support-badge');
+  if (!badge) return;
+  const pendingCount = (state.supportTickets || []).filter(
+    (t) => !t.isDeleted && (!t.status || t.status === 'pending')
+  ).length;
+  if (pendingCount > 0) {
+    badge.textContent = String(pendingCount);
+    badge.style.display = 'inline-block';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+function openSupportModal(targetTab = 'wishlist', prefillQuery = '') {
+  const dialog = document.getElementById('dialog-support-request');
+  if (!dialog) return;
+
+  // 1. Switch tabs inside dialog
+  const isWishlist = targetTab !== 'issue';
+  document.getElementById('btn-tab-modal-wishlist')?.classList.toggle('active', isWishlist);
+  document.getElementById('btn-tab-modal-issue')?.classList.toggle('active', !isWishlist);
+  const paneWishlist = document.getElementById('pane-modal-wishlist');
+  const paneIssue = document.getElementById('pane-modal-issue');
+  if (paneWishlist) paneWishlist.hidden = !isWishlist;
+  if (paneIssue) paneIssue.hidden = isWishlist;
+
+  // 2. Prefill customer contact from saved contact or logged-in user
+  let savedContact = null;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.SAVED_CONTACT);
+    if (raw) savedContact = JSON.parse(raw);
+  } catch (e) {}
+
+  const custName = savedContact?.name || state.currentUser?.displayName || '';
+  const custPhone = savedContact?.phone || '';
+  const custLine = savedContact?.lineId || '';
+  const custEmail = savedContact?.email || state.currentUser?.email || '';
+
+  if (document.getElementById('req-cust-name') && !document.getElementById('req-cust-name').value) {
+    document.getElementById('req-cust-name').value = custName;
+  }
+  if (document.getElementById('req-cust-phone') && !document.getElementById('req-cust-phone').value) {
+    document.getElementById('req-cust-phone').value = custPhone;
+  }
+  if (document.getElementById('req-cust-line') && !document.getElementById('req-cust-line').value) {
+    document.getElementById('req-cust-line').value = custLine;
+  }
+  if (document.getElementById('req-cust-email') && !document.getElementById('req-cust-email').value) {
+    document.getElementById('req-cust-email').value = custEmail;
+  }
+
+  if (document.getElementById('issue-cust-name') && !document.getElementById('issue-cust-name').value) {
+    document.getElementById('issue-cust-name').value = custName;
+  }
+  if (document.getElementById('issue-cust-phone') && !document.getElementById('issue-cust-phone').value) {
+    document.getElementById('issue-cust-phone').value = custPhone;
+  }
+  if (document.getElementById('issue-cust-line') && !document.getElementById('issue-cust-line').value) {
+    document.getElementById('issue-cust-line').value = custLine;
+  }
+  if (document.getElementById('issue-cust-email') && !document.getElementById('issue-cust-email').value) {
+    document.getElementById('issue-cust-email').value = custEmail;
+  }
+
+  if (prefillQuery && document.getElementById('req-prod-name')) {
+    document.getElementById('req-prod-name').value = prefillQuery;
+  }
+
+  dialog.showModal();
+}
+
+function renderAdminSupportTicketsTable() {
+  const container = document.getElementById('admin-support-tickets-list');
+  if (!container) return;
+
+  const typeFilter = document.getElementById('admin-support-filter-type')?.value || 'all';
+  const statusFilter = document.getElementById('admin-support-filter-status')?.value || 'all';
+
+  let tickets = (state.supportTickets || []).filter((t) => !t.isDeleted);
+
+  if (typeFilter !== 'all') {
+    tickets = tickets.filter((t) => t.type === typeFilter);
+  }
+  if (statusFilter !== 'all') {
+    tickets = tickets.filter((t) => (t.status || 'pending') === statusFilter);
+  }
+
+  if (tickets.length === 0) {
+    container.innerHTML = `
+      <div style="text-align:center; padding:3rem 1rem; background:rgba(15,23,42,0.4); border-radius:var(--radius-md); border:1px solid var(--border-subtle); color:var(--text-muted);">
+        <div style="font-size:2.4rem; margin-block-end:0.5rem;">💬</div>
+        <h3 style="margin:0 0 0.35rem; color:var(--text-secondary);">ยังไม่มีรายการแจ้งปัญหาหรือคำขอสินค้าในตัวกรองนี้</h3>
+        <p style="margin:0; font-size:0.86rem;">เมื่อลูกค้าส่งความต้องการสินค้าที่ร้านไม่มี หรือแจ้งปัญหาเข้ามา จะปรากฏในหน้านี้ทันทีแบบเรียลไทม์</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = tickets.map((t) => {
+    const isWishlist = t.type === 'wishlist';
+    const typeBadge = isWishlist
+      ? `<span class="badge badge-cyan" style="font-size:0.78rem;">💡 ขอสินค้าที่ร้านไม่มี</span>`
+      : `<span class="badge" style="font-size:0.78rem; background:rgba(244,63,94,0.2); color:#fda4af;">⚠️ แจ้งปัญหาการใช้งาน</span>`;
+
+    const statusVal = t.status || 'pending';
+    let statusBadge = '';
+    if (statusVal === 'pending') {
+      statusBadge = `<span class="badge badge-amber">⏳ รอแอดมินติดต่อกลับ</span>`;
+    } else if (statusVal === 'contacted') {
+      statusBadge = `<span class="badge badge-cyan">📞 ติดต่อลูกค้าแล้ว</span>`;
+    } else if (statusVal === 'resolved') {
+      statusBadge = `<span class="badge badge-emerald">✅ ดำเนินการเสร็จสิ้น</span>`;
+    } else {
+      statusBadge = `<span class="badge" style="background:#334155; color:#94a3b8;">📁 ปิดเรื่อง</span>`;
+    }
+
+    const intentTag = t.intent ? `<span class="badge badge-purple" style="font-size:0.76rem;">${escapeXml(t.intent)}</span>` : '';
+    const categoryTag = t.category ? `<span class="badge badge-outline" style="font-size:0.76rem;">${escapeXml(t.category)}</span>` : '';
+    const orderRef = t.orderId ? `<div style="font-size:0.82rem; color:var(--accent-cyan); margin-block-end:0.4rem;">📦 รหัสคำสั่งซื้อที่เกี่ยวข้อง: <strong>${escapeXml(t.orderId)}</strong></div>` : '';
+
+    const cleanLineId = String(t.lineId || '').trim();
+    const lineLink = cleanLineId && cleanLineId !== '-'
+      ? `https://line.me/ti/p/~${encodeURIComponent(cleanLineId.replace(/^@/, ''))}`
+      : '';
+
+    const imageThumb = t.screenshotDataUrl
+      ? `
+        <div style="margin-block:0.5rem;">
+          <span style="font-size:0.78rem; color:var(--text-muted); display:block; margin-block-end:0.25rem;">📸 รูปภาพแนบ:</span>
+          <img src="${t.screenshotDataUrl}" alt="รูปภาพแนบ" class="support-thumb-img" data-preview-support-img="${escapeXml(t.id)}" title="คลิกเพื่อดูรูปขนาดใหญ่">
+        </div>
+      `
+      : '';
+
+    return `
+      <div class="support-card ${isWishlist ? 'card-type-wishlist' : 'card-type-issue'}" id="ticket-card-${escapeXml(t.id)}">
+        <div class="support-card-header">
+          <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+            ${typeBadge}
+            ${statusBadge}
+            ${categoryTag}
+            ${intentTag}
+            <span style="font-size:0.78rem; color:var(--text-muted);">รหัส: ${escapeXml(t.id)}</span>
+          </div>
+          <div style="font-size:0.8rem; color:var(--text-muted);">
+            🕒 ${escapeXml(t.createdAtThai || t.createdAt || '')}
+          </div>
+        </div>
+
+        <div class="support-card-title">
+          ${escapeXml(t.title || '')}
+        </div>
+
+        ${orderRef}
+
+        <div class="support-card-details">${escapeXml(t.details || 'ไม่มีรายละเอียดเพิ่มเติม')}</div>
+
+        ${imageThumb}
+
+        <div style="margin-block:0.65rem;">
+          <span style="font-size:0.8rem; color:var(--text-muted); display:block; margin-block-end:0.35rem; font-weight:600;">
+            👤 ข้อมูลติดต่อลูกค้าสำหรับติดต่อกลับ:
+          </span>
+          <div class="contact-pill-group">
+            <span class="contact-link-pill">
+              👤 ${escapeXml(t.customerName || 'ไม่ระบุชื่อ')}
+            </span>
+
+            ${t.phone ? `
+              <a href="tel:${escapeXml(t.phone)}" class="contact-link-pill pill-phone" title="คลิกเพื่อโทรออกหาลูกค้า">
+                📞 โทร: ${escapeXml(t.phone)}
+              </a>
+              <button type="button" class="btn btn-outline btn-sm" style="font-size:0.75rem; padding:0.2rem 0.5rem;" data-copy-contact="${escapeXml(t.phone)}" title="คัดลอกเบอร์โทร">
+                📋 คัดลอกเบอร์
+              </button>
+            ` : ''}
+
+            ${cleanLineId && cleanLineId !== '-' ? `
+              <a href="${lineLink}" target="_blank" rel="noopener noreferrer" class="contact-link-pill pill-line" title="คลิกเพื่อเปิดคุย LINE">
+                💬 LINE: ${escapeXml(cleanLineId)}
+              </a>
+              <button type="button" class="btn btn-outline btn-sm" style="font-size:0.75rem; padding:0.2rem 0.5rem;" data-copy-contact="${escapeXml(cleanLineId)}" title="คัดลอก Line ID">
+                📋 คัดลอก LINE
+              </button>
+            ` : ''}
+
+            ${t.email && t.email.includes('@') ? `
+              <a href="mailto:${escapeXml(t.email)}" class="contact-link-pill" title="ส่งอีเมล">
+                ✉️ ${escapeXml(t.email)}
+              </a>
+            ` : ''}
+          </div>
+        </div>
+
+        <div class="support-admin-bar">
+          <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; flex:1;">
+            <label style="font-size:0.82rem; color:var(--text-secondary); white-space:nowrap;">อัปเดตสถานะ:</label>
+            <select data-ticket-status="${escapeXml(t.id)}" style="inline-size:auto; padding:0.3rem 0.6rem; font-size:0.82rem;">
+              <option value="pending" ${statusVal === 'pending' ? 'selected' : ''}>⏳ รอแอดมินติดต่อกลับ</option>
+              <option value="contacted" ${statusVal === 'contacted' ? 'selected' : ''}>📞 ติดต่อลูกค้าแล้ว</option>
+              <option value="resolved" ${statusVal === 'resolved' ? 'selected' : ''}>✅ ดำเนินการเสร็จสิ้น</option>
+              <option value="closed" ${statusVal === 'closed' ? 'selected' : ''}>📁 ปิดเรื่อง</option>
+            </select>
+
+            <input
+              type="text"
+              data-ticket-admin-note="${escapeXml(t.id)}"
+              value="${escapeXml(t.adminNote || '')}"
+              placeholder="บันทึกช่วยจำของแอดมิน (เช่น โทรแจ้งแล้ว ลูกค้าจองไว้)..."
+              style="flex:1; min-inline-size:180px; padding:0.3rem 0.6rem; font-size:0.82rem;"
+            >
+            <button type="button" class="btn btn-outline btn-sm" data-save-ticket-note="${escapeXml(t.id)}" style="font-size:0.8rem; white-space:nowrap;">
+              💾 บันทึก
+            </button>
+          </div>
+
+          <button type="button" class="btn btn-danger btn-sm" data-delete-ticket="${escapeXml(t.id)}" style="font-size:0.78rem; white-space:nowrap;">
+            🗑️ ลบ
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // Attach dynamic event listeners on ticket cards
+  container.querySelectorAll('[data-ticket-status]').forEach((sel) => {
+    sel.addEventListener('change', async (e) => {
+      const ticketId = sel.getAttribute('data-ticket-status');
+      const newStatus = e.target.value;
+      const t = state.supportTickets.find((x) => x.id === ticketId);
+      if (t) {
+        t.status = newStatus;
+        t.updatedAtMs = Date.now();
+        saveStateLocally();
+        await saveSupportTicketToCloud(t);
+        await sendSupportTicketToGoogleSheet(t, 'sync_support_ticket');
+        updateSupportBadgeCount();
+        renderAdminSupportTicketsTable();
+        showToast(`🔄 อัปเดตสถานะรายการ ${ticketId} เรียบร้อยแล้ว`);
+      }
+    });
+  });
+
+  container.querySelectorAll('[data-save-ticket-note]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const ticketId = btn.getAttribute('data-save-ticket-note');
+      const noteInput = container.querySelector(`[data-ticket-admin-note="${ticketId}"]`);
+      const newNote = noteInput?.value.trim() || '';
+      const t = state.supportTickets.find((x) => x.id === ticketId);
+      if (t) {
+        t.adminNote = newNote;
+        t.updatedAtMs = Date.now();
+        saveStateLocally();
+        await saveSupportTicketToCloud(t);
+        await sendSupportTicketToGoogleSheet(t, 'sync_support_ticket');
+        showToast(`💾 บันทึกโน้ตของรายการ ${ticketId} เรียบร้อยแล้ว`);
+      }
+    });
+  });
+
+  container.querySelectorAll('[data-delete-ticket]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const ticketId = btn.getAttribute('data-delete-ticket');
+      if (!confirm(`คุณแน่ใจหรือไม่ว่าต้องการลบรายการ ${ticketId} ออกจากระบบ?`)) return;
+      const t = state.supportTickets.find((x) => x.id === ticketId);
+      if (t) {
+        t.isDeleted = true;
+        t.updatedAtMs = Date.now();
+      }
+      state.supportTickets = state.supportTickets.filter((x) => x.id !== ticketId);
+      saveStateLocally();
+      await deleteSupportTicketFromCloud(ticketId);
+      await deleteSupportTicketFromGoogleSheet(ticketId);
+      updateSupportBadgeCount();
+      renderAdminSupportTicketsTable();
+      showToast(`🗑️ ลบรายการ ${ticketId} ออกจากระบบเรียบร้อยแล้ว`);
+    });
+  });
+
+  container.querySelectorAll('[data-copy-contact]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const text = btn.getAttribute('data-copy-contact');
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast(`📋 คัดลอก "${text}" เรียบร้อยแล้ว!`);
+      } catch (e) {
+        prompt('คัดลอกข้อความนี้:', text);
+      }
+    });
+  });
+
+  container.querySelectorAll('[data-preview-support-img]').forEach((img) => {
+    img.addEventListener('click', () => {
+      openInfoViewerModal('📸 รูปภาพแนบจากลูกค้า', `<div style="text-align:center;"><img src="${img.src}" alt="รูปภาพแนบ" style="max-inline-size:100%; border-radius:8px;"></div>`);
+    });
+  });
+}
+
+function exportSupportTicketsToCsv() {
+  const tickets = (state.supportTickets || []).filter((t) => !t.isDeleted);
+  if (tickets.length === 0) {
+    showToast('ไม่มีรายการแจ้งปัญหาหรือคำขอสินค้าสำหรับส่งออก', 'warning');
+    return;
+  }
+
+  const headers = [
+    'รหัสรายการ',
+    'วัน-เวลา',
+    'ประเภท',
+    'หมวดหมู่',
+    'ชื่อสินค้า/หัวข้อปัญหา',
+    'รูปแบบความต้องการ',
+    'รายละเอียด',
+    'รหัสออเดอร์',
+    'ชื่อลูกค้า',
+    'เบอร์โทร',
+    'Line ID',
+    'อีเมล',
+    'สถานะ',
+    'บันทึกแอดมิน'
+  ];
+
+  const rows = tickets.map((t) => [
+    t.id,
+    t.createdAtThai || t.createdAt,
+    t.type === 'wishlist' ? 'ขอสินค้าที่ร้านไม่มี' : 'แจ้งปัญหาการใช้งาน',
+    t.category || '',
+    t.title || '',
+    t.intent || '',
+    (t.details || '').replace(/\r?\n/g, ' '),
+    t.orderId || '',
+    t.customerName || '',
+    t.phone ? `'${t.phone}` : '',
+    t.lineId || '',
+    t.email || '',
+    t.status || 'pending',
+    (t.adminNote || '').replace(/\r?\n/g, ' ')
+  ]);
+
+  const csvContent = '\uFEFF' + [headers, ...rows]
+    .map((r) => r.map((c) => `"${String(c || '').replace(/"/g, '""')}"`).join(','))
+    .join('\r\n');
+
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `takeit_support_requests_${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  showToast('📊 ดาวน์โหลดไฟล์ CSV เรียบร้อยแล้ว');
+}
+
+async function syncAllSupportTicketsToGoogleSheet() {
+  const webhookUrl = (state.settings.sheetWebhookUrl || '').trim();
+  if (!webhookUrl || !webhookUrl.startsWith('http')) {
+    showToast('⚠️ ยังไม่ได้ระบุ Google Apps Script Web App URL ในหน้าตั้งค่า', 'warning');
+    return;
+  }
+  const tickets = (state.supportTickets || []).filter((t) => !t.isDeleted);
+  showToast('☁️ กำลังซิงค์รายการแจ้งปัญหา & คำขอสินค้าไปยัง Google Sheets...');
+  const ok = await postPayloadToGoogleSheet(webhookUrl, {
+    action: 'sync_all_support_tickets',
+    tickets
+  });
+  if (ok) {
+    showToast(`✅ ซิงค์รายการคำขอและแจ้งปัญหา ${tickets.length} รายการเข้า Google Sheets เรียบร้อยแล้ว!`);
+  } else {
+    showToast('⚠️ ไม่สามารถส่งข้อมูลเข้า Google Sheets ได้ โปรดตรวจสอบ Webhook URL', 'warning');
   }
 }

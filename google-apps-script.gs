@@ -18,6 +18,7 @@
 const SPREADSHEET_ID = '1Aoz7JwpgkzeaEZJR_nDtht5gvoiMu-0K9qjvl7A40WQ';
 const SHEET_ORDERS = 'Orders';
 const SHEET_PRODUCTS = 'Products';
+const SHEET_SUPPORT = 'Support_And_Requests';
 
 function getSpreadsheet() {
   try {
@@ -35,6 +36,7 @@ function setupSheetTableNow() {
   const ss = getSpreadsheet();
   ensureOrderSheet(ss);
   ensureProductSheet(ss);
+  ensureSupportSheet(ss);
 }
 
 function doPost(e) {
@@ -151,6 +153,38 @@ function processWebhookPayload(payload) {
     return jsonResponse({
       status: 'success',
       count: payload.products.length
+    });
+  }
+
+  if (action === 'submit_support_ticket' || action === 'sync_support_ticket') {
+    const supportSheet = ensureSupportSheet(ss);
+    const ticket = payload.ticket || payload;
+    upsertSupportRow(supportSheet, ticket);
+    return jsonResponse({
+      status: 'success',
+      ticketId: ticket.id
+    });
+  }
+
+  if (action === 'delete_support_ticket') {
+    const supportSheet = ensureSupportSheet(ss);
+    const targetId = payload.ticketId || (payload.ticket && payload.ticket.id) || '';
+    const deleted = deleteSupportRowById(supportSheet, targetId);
+    return jsonResponse({
+      status: 'success',
+      deleted: deleted,
+      ticketId: targetId
+    });
+  }
+
+  if (action === 'sync_all_support_tickets' && Array.isArray(payload.tickets)) {
+    const supportSheet = ensureSupportSheet(ss);
+    payload.tickets.forEach(function(ticket) {
+      upsertSupportRow(supportSheet, ticket);
+    });
+    return jsonResponse({
+      status: 'success',
+      count: payload.tickets.length
     });
   }
 
@@ -318,6 +352,95 @@ function syncProductsToSheet(sheet, products) {
     ];
   });
   sheet.getRange(2, 1, rows.length, 10).setValues(rows);
+}
+
+function ensureSupportSheet(ss) {
+  let sheet = ss.getSheetByName(SHEET_SUPPORT);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEET_SUPPORT);
+  }
+  if (sheet.getLastRow() === 0) {
+    const headers = [
+      'รหัสรายการ (ID)',
+      'วัน-เวลาที่ส่ง',
+      'ประเภท (Type)',
+      'หมวดหมู่ / แพลตฟอร์ม',
+      'ชื่อสินค้าที่อยากได้ / หัวข้อปัญหา',
+      'ความต้องการ (ซื้อ/เช่า)',
+      'รายละเอียดเพิ่มเติม / ปัญหาที่พบ',
+      'รหัสออเดอร์ (ถ้ามี)',
+      'ชื่อลูกค้า',
+      'เบอร์โทรศัพท์',
+      'Line ID',
+      'อีเมล',
+      'ช่องทางที่สะดวกให้ติดต่อกลับ',
+      'สถานะการดำเนินงาน',
+      'บันทึกของแอดมิน'
+    ];
+    sheet.appendRow(headers);
+    sheet.getRange(1, 1, 1, headers.length)
+      .setFontWeight('bold')
+      .setBackground('#0f172a')
+      .setFontColor('#38bdf8');
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+function upsertSupportRow(sheet, ticket) {
+  const rowValues = [
+    ticket.id || '',
+    ticket.createdAtThai || ticket.createdAt || new Date().toLocaleString('th-TH'),
+    ticket.type === 'wishlist' ? '💡 ขอสินค้าที่ร้านไม่มี' : '⚠️ แจ้งปัญหาการใช้งาน',
+    ticket.category || '-',
+    ticket.title || '',
+    ticket.intentLabel || ticket.intent || '-',
+    ticket.details || '',
+    ticket.orderId || '-',
+    ticket.customerName || '',
+    ticket.phone ? "'" + ticket.phone : '',
+    ticket.lineId || '-',
+    ticket.email || '-',
+    ticket.preferredContact || '-',
+    ticket.statusLabel || ticket.status || 'รอแอดมินติดต่อกลับ',
+    ticket.adminNote || '-'
+  ];
+
+  const data = sheet.getDataRange().getValues();
+  let foundRowIndex = -1;
+  const lookupId = String(ticket.id || '');
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === lookupId) {
+      foundRowIndex = i + 1;
+      break;
+    }
+  }
+
+  if (ticket.isDeleted) {
+    if (foundRowIndex > 1) {
+      sheet.deleteRow(foundRowIndex);
+    }
+    return;
+  }
+
+  if (foundRowIndex > 1) {
+    sheet.getRange(foundRowIndex, 1, 1, rowValues.length).setValues([rowValues]);
+  } else {
+    sheet.appendRow(rowValues);
+  }
+}
+
+function deleteSupportRowById(sheet, ticketId) {
+  if (!ticketId) return false;
+  const data = sheet.getDataRange().getValues();
+  let deletedAny = false;
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (String(data[i][0]) === String(ticketId)) {
+      sheet.deleteRow(i + 1);
+      deletedAny = true;
+    }
+  }
+  return deletedAny;
 }
 
 function jsonResponse(obj) {

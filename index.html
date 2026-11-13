@@ -77,6 +77,10 @@
           📦 เช็คสถานะคำสั่งซื้อ
         </button>
 
+        <button type="button" class="btn btn-outline btn-sm" id="btn-open-support" title="แจ้งปัญหาการใช้งาน หรือขอสินค้าที่ร้านไม่มี">
+          📢 แจ้งปัญหา / ขอสินค้า
+        </button>
+
         <button type="button" class="btn btn-primary cart-btn" id="btn-open-cart">
           🛒 ตะกร้าสินค้า
           <span class="cart-count" id="cart-count-badge">0</span>
@@ -138,6 +142,9 @@
         </button>
         <button type="button" class="tab-btn" data-admin-tab="products">
           🎮 จัดการสินค้า &amp; ราคาเช่า/มัดจำ
+        </button>
+        <button type="button" class="tab-btn" data-admin-tab="support" id="btn-admin-tab-support">
+          💬 แจ้งปัญหา &amp; คำขอสินค้า <span class="badge badge-amber" id="admin-support-badge" style="display:none; font-size:0.7rem; padding:0.12rem 0.45rem; margin-inline-start:0.3rem;">0</span>
         </button>
         <button type="button" class="tab-btn" data-admin-tab="settings">
           ⚙️ ตั้งค่า Google Sheets / Firebase Cloud / บัญชีรับเงิน
@@ -312,6 +319,40 @@
           </div>
         </form>
       </div>
+
+      <!-- Admin Tab 4: Customer Support & Product Requests -->
+      <div id="admin-tab-support" class="admin-tab-content" hidden>
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.75rem; margin-block-end:0.85rem;">
+          <div style="display:flex; gap:0.6rem; align-items:center; flex-wrap:wrap;">
+            <label for="admin-support-filter-type" style="font-size:0.85rem; color:var(--text-secondary);">ประเภท:</label>
+            <select id="admin-support-filter-type" style="inline-size:auto;">
+              <option value="all">ทั้งหมด</option>
+              <option value="wishlist">💡 เฉพาะคำขอสินค้าที่ร้านไม่มี</option>
+              <option value="issue">⚠️ เฉพาะรายการแจ้งปัญหา</option>
+            </select>
+
+            <label for="admin-support-filter-status" style="font-size:0.85rem; color:var(--text-secondary);">สถานะ:</label>
+            <select id="admin-support-filter-status" style="inline-size:auto;">
+              <option value="all">ทุกสถานะ</option>
+              <option value="pending">⏳ รอแอดมินติดต่อกลับ</option>
+              <option value="contacted">📞 ติดต่อลูกค้าแล้ว</option>
+              <option value="resolved">✅ ดำเนินการเสร็จสิ้น</option>
+              <option value="closed">📁 ปิดเรื่อง</option>
+            </select>
+          </div>
+
+          <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+            <button type="button" class="btn btn-outline btn-sm" id="btn-export-support-csv">
+              📊 ดาวน์โหลดรายการเป็นไฟล์ Sheet (CSV)
+            </button>
+            <button type="button" class="btn btn-outline btn-sm" id="btn-sync-support-sheet">
+              ☁️ ซิงค์เข้า Google Sheets ทั้งหมด
+            </button>
+          </div>
+        </div>
+
+        <div id="admin-support-tickets-list" style="display:flex; flex-direction:column; gap:0.85rem;"></div>
+      </div>
     </section>
 
     <!-- Hero Section -->
@@ -423,12 +464,17 @@
         <span class="badge badge-amber">🚀 UPCOMING GAMER IT HARDWARE</span>
         <h3 style="margin:0.4rem 0 0.25rem;">หมวดสินค้า IT การ์ดจอ จอเกมมิ่ง และเกมมิ่งเกียร์ กำลังทยอยเข้าสต็อก!</h3>
         <p style="margin:0; color:var(--text-secondary); font-size:0.9rem;">
-          ตอนนี้ทางร้าน <strong>TakeIT</strong> เน้นจำหน่าย <strong>เครื่องเกมคอนโซล</strong> และ <strong>บริการซื้อ-เช่าแผ่นเกมคอนโซล</strong> เป็นหลัก ส่วนสินค้า IT อื่นๆ แอดมินจะทยอยเพิ่มเข้าหน้าร้านให้ชมเร็วๆ นี้
+          ตอนนี้ทางร้าน <strong>TakeIT</strong> เน้นจำหน่าย <strong>เครื่องเกมคอนโซล</strong> และ <strong>บริการซื้อ-เช่าแผ่นเกมคอนโซล</strong> เป็นหลัก ส่วนสินค้า IT อื่นๆ แอดมินจะทยอยเพิ่มเข้าหน้าร้านให้ชมเร็วๆ นี้ (หรือเสนอสินค้าที่อยากได้ให้ร้านจัดหาได้เลย)
         </p>
       </div>
-      <button type="button" class="btn btn-outline" id="btn-view-upcoming">
-        👀 ดูตัวอย่างสินค้า IT ที่กำลังจะมา
-      </button>
+      <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+        <button type="button" class="btn btn-outline" id="btn-view-upcoming">
+          👀 ดูตัวอย่างสินค้า IT ที่กำลังจะมา
+        </button>
+        <button type="button" class="btn btn-primary" id="btn-banner-request-product">
+          💡 เสนอสินค้า IT / เกมที่อยากได้
+        </button>
+      </div>
     </section>
 
   </main>
@@ -438,9 +484,17 @@
       <p style="margin:0 0 0.35rem; font-weight:700; color:var(--text-primary);">
         🎮 TakeIT Gaming &amp; Console Store — ร้านสินค้า IT และคอนโซลสำหรับเกมเมอร์
       </p>
-      <p style="margin:0;">
+      <p style="margin:0 0 0.85rem;">
         จำหน่ายเครื่องเกมคอนโซล • ซื้อ-เช่าแผ่นเกมคอนโซลรายวัน • ชำระเงินปลอดภัย • เชื่อมต่อระบบข้อมูลคำสั่งซื้อเข้าโปรแกรม Sheet อัตโนมัติ
       </p>
+      <div style="display:flex; justify-content:center; gap:0.65rem; flex-wrap:wrap; padding-block-top:0.65rem; border-block-start:1px solid rgba(255,255,255,0.08);">
+        <button type="button" class="btn btn-outline btn-sm" id="btn-footer-open-support">
+          📢 แจ้งปัญหาการใช้งาน / คำสั่งซื้อ
+        </button>
+        <button type="button" class="btn btn-outline btn-sm" id="btn-footer-request-item">
+          💡 สั่งจอง / ส่งความต้องการสินค้าที่ร้านไม่มี
+        </button>
+      </div>
     </div>
   </footer>
 
@@ -1042,12 +1096,212 @@
     </form>
   </dialog>
 
+  <!-- ========================================================================
+       DIALOG 10: Customer Problem Report & Product Wishlist / Request Modal
+       ======================================================================== -->
+  <dialog id="dialog-support-request" closedby="any" aria-labelledby="support-dialog-title" style="max-inline-size: min(680px, 96vw);">
+    <div class="dialog-header">
+      <h2 id="support-dialog-title">📢 แจ้งปัญหา / ส่งความต้องการสินค้าที่ร้านไม่มี</h2>
+      <button type="button" class="btn btn-outline btn-sm" data-close-dialog="dialog-support-request" aria-label="ปิดหน้าต่าง">✕ ปิด</button>
+    </div>
+    <div class="dialog-body">
+      <!-- Tabs for Dialog 10 -->
+      <div class="support-modal-tabs" role="tablist" style="display:flex; gap:0.5rem; margin-block-end:1.25rem;">
+        <button type="button" class="tab-btn active" id="btn-tab-modal-wishlist" data-support-target="wishlist">
+          💡 เสนอสินค้าที่อยากได้ (ร้านไม่มีตอนนี้)
+        </button>
+        <button type="button" class="tab-btn" id="btn-tab-modal-issue" data-support-target="issue">
+          ⚠️ แจ้งปัญหาการใช้งาน / ออเดอร์
+        </button>
+      </div>
+
+      <!-- Pane 1: Request Product / Wishlist -->
+      <div id="pane-modal-wishlist">
+        <div class="highlight-box" style="margin-block-end:1rem; padding:0.9rem 1.1rem; border-color:rgba(56,189,248,0.35); background:rgba(56,189,248,0.06);">
+          <div style="font-weight:700; color:var(--accent-cyan); margin-block-end:0.25rem;">
+            🎮 ร้าน TakeIT ยังไม่มีแผ่นเกมหรือสินค้า IT ที่คุณกำลังหาอยู่ใช่ไหม?
+          </div>
+          <div style="font-size:0.85rem; color:var(--text-secondary); line-height:1.5;">
+            กรอกชื่อสินค้าและช่องทางติดต่อไว้ได้เลยครับ เมื่อทางร้านจัดหาของเข้าร้าน หรือมีแผ่นเกมเปิดให้เช่า/ซื้อ ทางเราจะรีบติดต่อกลับแจ้งคุณเป็นคิวแรกทันที!
+          </div>
+        </div>
+
+        <form id="form-request-product">
+          <div class="field">
+            <label for="req-prod-name">ชื่อสินค้า / แผ่นเกม / อุปกรณ์ IT ที่คุณอยากได้ *</label>
+            <input
+              type="text"
+              id="req-prod-name"
+              required
+              placeholder="เช่น EA Sports FC 25 (PS5), Black Myth: Wukong, จอย DualSense Edge, จอเกมมิ่ง 144Hz"
+            >
+            <div class="error-msg">กรุณาระบุชื่อสินค้าหรือแผ่นเกมที่คุณต้องการ</div>
+          </div>
+
+          <div class="form-grid-2">
+            <div class="field">
+              <label for="req-prod-platform">หมวดหมู่ / แพลตฟอร์ม</label>
+              <select id="req-prod-platform">
+                <option value="แผ่นเกม PS5">💿 แผ่นเกม PlayStation 5 (PS5)</option>
+                <option value="แผ่นเกม Switch">💿 แผ่นเกม Nintendo Switch</option>
+                <option value="แผ่นเกม PS4">💿 แผ่นเกม PlayStation 4 (PS4)</option>
+                <option value="เครื่องเกมคอนโซล">🕹️ เครื่องเกมคอนโซล (PS5, Switch, Xbox, Handheld)</option>
+                <option value="จอยเกม / เกมมิ่งเกียร์">🎮 จอยเกมคอนโซล / Gaming Gear</option>
+                <option value="สินค้า IT / การ์ดจอ / จอคอม">🖥️ สินค้า IT (การ์ดจอ, จอมอนิเตอร์, PC)</option>
+                <option value="อื่นๆ">📦 อื่นๆ</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label for="req-prod-intent">รูปแบบที่ต้องการ</label>
+              <select id="req-prod-intent">
+                <option value="ซื้อขาด">🛒 ต้องการซื้อขาด</option>
+                <option value="เช่ารายวัน">💿 ต้องการเช่าแผ่นรายวัน</option>
+                <option value="ซื้อขาดหรือเช่าก็ได้">✨ ซื้อขาดหรือเช่าก็ได้</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="req-prod-details">รายละเอียดเพิ่มเติม / งบประมาณโดยประมาณ (ถ้ามี)</label>
+            <textarea
+              id="req-prod-details"
+              rows="2"
+              placeholder="เช่น ขอโซน 3 เมนูภาษาอังกฤษ, มือหนึ่งหรือมือสองสภาพสวยก็ได้, งบประมาณไม่เกิน 1,500 บาท..."
+            ></textarea>
+          </div>
+
+          <div class="highlight-box" style="padding:1rem; margin-block-end:1rem; border-color:rgba(168,85,247,0.35); background:rgba(168,85,247,0.05);">
+            <div style="font-weight:700; color:#d8b4fe; margin-block-end:0.6rem; font-size:0.92rem;">
+              📞 ช่องทางสำหรับให้ร้าน TakeIT ติดต่อกลับเมื่อสินค้ามาถึง
+            </div>
+            <div class="form-grid-2">
+              <div class="field">
+                <label for="req-cust-name">ชื่อของคุณ / ชื่อเล่น *</label>
+                <input type="text" id="req-cust-name" required placeholder="เช่น บอส, คุณภาณุเดช">
+                <div class="error-msg">กรุณาระบุชื่อผู้ติดต่อ</div>
+              </div>
+              <div class="field">
+                <label for="req-cust-phone">เบอร์โทรศัพท์ติดต่อ *</label>
+                <input type="tel" id="req-cust-phone" required placeholder="08xxxxxxxx" pattern="[0-9-+\s]{9,15}">
+                <div class="error-msg">กรุณาระบุเบอร์โทรศัพท์ที่ติดต่อได้</div>
+              </div>
+            </div>
+            <div class="form-grid-2">
+              <div class="field" style="margin-block-end:0;">
+                <label for="req-cust-line">Line ID (สะดวกที่สุดสำหรับส่งรูปรหัสหรือแจ้งสต็อก) *</label>
+                <input type="text" id="req-cust-line" required placeholder="เช่น @lineid หรือเบอร์โทร">
+                <div class="error-msg">กรุณาระบุ Line ID เพื่อให้ทีมงานทักแจ้ง</div>
+              </div>
+              <div class="field" style="margin-block-end:0;">
+                <label for="req-cust-email">อีเมล (ไม่บังคับ)</label>
+                <input type="email" id="req-cust-email" placeholder="gamer@gmail.com">
+              </div>
+            </div>
+          </div>
+
+          <div class="dialog-footer" style="padding-inline:0; padding-block-end:0; background:transparent;">
+            <button type="button" class="btn btn-outline" data-close-dialog="dialog-support-request">ยกเลิก</button>
+            <button type="submit" class="btn btn-primary" id="btn-submit-request-prod">🚀 ส่งคำขอสินค้า &amp; ให้ร้านติดต่อกลับ</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Pane 2: Report Problem / Issue -->
+      <div id="pane-modal-issue" hidden>
+        <div class="highlight-box" style="margin-block-end:1rem; padding:0.9rem 1.1rem; border-color:rgba(244,63,94,0.35); background:rgba(244,63,94,0.06);">
+          <div style="font-weight:700; color:#fda4af; margin-block-end:0.25rem;">
+            ⚠️ ศูนย์ช่วยเหลือและรับแจ้งปัญหา TakeIT
+          </div>
+          <div style="font-size:0.85rem; color:var(--text-secondary); line-height:1.5;">
+            พบปัญหาเกี่ยวกับออเดอร์, การเช่าแผ่นเกม, การขอรับเงินมัดจำคืน, สลิปโอนเงิน หรือเว็บไซต์ แจ้งรายละเอียดให้ทีมงานดูแลและแก้ไขให้ทันทีครับ
+          </div>
+        </div>
+
+        <form id="form-report-issue">
+          <div class="form-grid-2">
+            <div class="field">
+              <label for="issue-category">ประเภทปัญหาที่พบ *</label>
+              <select id="issue-category" required>
+                <option value="ปัญหาการเช่า/ส่งคืนแผ่น/รับเงินมัดจำ">💿 ปัญหาการเช่าแผ่นเกม / ส่งคืนแผ่น / ขอรับเงินมัดจำ</option>
+                <option value="ปัญหาสลิปโอนเงิน/ยอดชำระเงิน">💳 ปัญหาสลิปโอนเงิน / ยอดชำระเงินไม่ถูกต้อง</option>
+                <option value="ปัญหาการจัดส่งพัสดุ/ได้รับของช้า">🚚 ปัญหาการจัดส่งพัสดุ / ได้รับสินค้าล่าช้า</option>
+                <option value="ตัวสินค้า/แผ่นเกมชำรุดหรือเปิดไม่ติด">🎮 ตัวสินค้า / แผ่นเกมชำรุด / เล่นไม่ได้</option>
+                <option value="ข้อผิดพลาดบนเว็บไซต์/ระบบทำงานผิดพลาด">💻 ข้อผิดพลาดบนเว็บไซต์ / พบบั๊ก</option>
+                <option value="เรื่องอื่นๆ / สอบถามเพิ่มเติม">❓ เรื่องอื่นๆ / สอบถามแอดมิน</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label for="issue-order-id">รหัสคำสั่งซื้อที่เกี่ยวข้อง (ถ้ามี)</label>
+              <input type="text" id="issue-order-id" placeholder="เช่น TK-179439200...">
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="issue-details">รายละเอียดปัญหาที่พบอย่างละเอียด *</label>
+            <textarea
+              id="issue-details"
+              rows="3"
+              required
+              placeholder="ระบุปัญหาที่คุณพบ เพื่อให้ทีมงานช่วยตรวจสอบและแก้ไขได้อย่างรวดเร็ว..."
+            ></textarea>
+            <div class="error-msg">กรุณาระบุรายละเอียดปัญหาที่พบ</div>
+          </div>
+
+          <div class="field">
+            <label for="issue-image-file">แนบรูปภาพประกอบปัญหา / ภาพหน้าจอ (ไม่บังคับ - รองรับ JPG, PNG, HEIC iPhone)</label>
+            <input type="file" id="issue-image-file" accept="image/*,.heic,.heif,image/heic,image/heif">
+            <div id="issue-image-preview-wrap" style="display:none; margin-block-top:0.5rem; align-items:center; gap:0.75rem;">
+              <img id="issue-image-preview" src="" alt="รูปภาพประกอบปัญหา" style="max-inline-size:120px; max-block-size:80px; border-radius:6px; border:1px solid var(--border-subtle); object-fit:cover;">
+              <button type="button" class="btn btn-outline btn-sm" id="btn-remove-issue-image" style="font-size:0.78rem;">🗑️ ลบรูปนี้</button>
+            </div>
+          </div>
+
+          <div class="highlight-box" style="padding:1rem; margin-block-end:1rem; border-color:rgba(244,63,94,0.3); background:rgba(244,63,94,0.04);">
+            <div style="font-weight:700; color:#fda4af; margin-block-end:0.6rem; font-size:0.92rem;">
+              📞 ข้อมูลติดต่อของคุณเพื่อให้ทีมงานติดต่อกลับดูแลปัญหา
+            </div>
+            <div class="form-grid-2">
+              <div class="field">
+                <label for="issue-cust-name">ชื่อของคุณ *</label>
+                <input type="text" id="issue-cust-name" required placeholder="เช่น คุณสมชาย">
+                <div class="error-msg">กรุณาระบุชื่อของคุณ</div>
+              </div>
+              <div class="field">
+                <label for="issue-cust-phone">เบอร์โทรศัพท์ติดต่อ *</label>
+                <input type="tel" id="issue-cust-phone" required placeholder="08xxxxxxxx" pattern="[0-9-+\s]{9,15}">
+                <div class="error-msg">กรุณาระบุเบอร์โทรศัพท์</div>
+              </div>
+            </div>
+            <div class="form-grid-2">
+              <div class="field" style="margin-block-end:0;">
+                <label for="issue-cust-line">Line ID (สำหรับส่งหลักฐานหรือตอบแชท) *</label>
+                <input type="text" id="issue-cust-line" required placeholder="เช่น @lineid">
+                <div class="error-msg">กรุณาระบุ Line ID</div>
+              </div>
+              <div class="field" style="margin-block-end:0;">
+                <label for="issue-cust-email">อีเมล (ไม่บังคับ)</label>
+                <input type="email" id="issue-cust-email" placeholder="your@email.com">
+              </div>
+            </div>
+          </div>
+
+          <div class="dialog-footer" style="padding-inline:0; padding-block-end:0; background:transparent;">
+            <button type="button" class="btn btn-outline" data-close-dialog="dialog-support-request">ยกเลิก</button>
+            <button type="submit" class="btn btn-danger" id="btn-submit-report-issue">📨 ส่งแจ้งปัญหาให้ทีมงานตรวจสอบ</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </dialog>
+
   <!-- Toast Container -->
   <div id="toast-container" class="toast-container" aria-live="polite"></div>
 
   <!-- HEIC/HEIF image decoder for Apple iPhone photos in Chrome & other browsers -->
   <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js" defer></script>
-  <script src="app.js?v=20261113-delorder1" defer></script>
+  <script src="app.js?v=20261114-support1" defer></script>
 </body>
 </html>
 
