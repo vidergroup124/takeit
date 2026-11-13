@@ -123,6 +123,17 @@ function processWebhookPayload(payload) {
     });
   }
 
+  if (action === 'delete_order') {
+    const sheet = ensureOrderSheet(ss);
+    const targetId = payload.orderId || (payload.order && payload.order.id) || '';
+    const deleted = deleteOrderRowById(sheet, targetId);
+    return jsonResponse({
+      status: 'success',
+      deleted: deleted,
+      orderId: targetId
+    });
+  }
+
   if (action === 'sync_all_orders' && Array.isArray(payload.orders)) {
     const sheet = ensureOrderSheet(ss);
     payload.orders.forEach(function(order) {
@@ -224,11 +235,19 @@ function upsertOrderRow(sheet, order) {
 
   const data = sheet.getDataRange().getValues();
   let foundRowIndex = -1;
+  const lookupId = String(order.originalOrderId || order.id || '');
   for (let i = 1; i < data.length; i++) {
-    if (String(data[i][0]) === String(order.id)) {
+    if (String(data[i][0]) === lookupId) {
       foundRowIndex = i + 1;
       break;
     }
+  }
+
+  if (order.isDeletedByAdmin || order._deleteFromSheet) {
+    if (foundRowIndex > 1) {
+      sheet.deleteRow(foundRowIndex);
+    }
+    return;
   }
 
   if (foundRowIndex > 1) {
@@ -236,6 +255,19 @@ function upsertOrderRow(sheet, order) {
   } else {
     sheet.appendRow(rowValues);
   }
+}
+
+function deleteOrderRowById(sheet, orderId) {
+  if (!orderId) return false;
+  const data = sheet.getDataRange().getValues();
+  let deletedAny = false;
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (String(data[i][0]) === String(orderId)) {
+      sheet.deleteRow(i + 1);
+      deletedAny = true;
+    }
+  }
+  return deletedAny;
 }
 
 function ensureProductSheet(ss) {

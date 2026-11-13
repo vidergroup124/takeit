@@ -26,7 +26,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Prompt:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20261113-contract1">
+  <link rel="stylesheet" href="styles.css?v=20261113-delorder1">
   <style>
     /* Force override any cached mobile CSS so modal dialogs never collapse on iOS / Instagram browser */
     dialog[open] {
@@ -994,12 +994,60 @@
     <div class="dialog-body" id="contract-dialog-body"></div>
   </dialog>
 
+  <!-- ========================================================================
+       DIALOG 9: Admin Delete Order with Customer Notification Reason Modal
+       ======================================================================== -->
+  <dialog id="dialog-delete-order" closedby="closerequest" aria-labelledby="delete-order-title" style="max-inline-size: min(560px, 95vw);">
+    <div class="dialog-header">
+      <h2 id="delete-order-title">🗑️ ลบคำสั่งซื้อและระบุเหตุผลแจ้งลูกค้า</h2>
+      <button type="button" class="btn btn-outline btn-sm" data-close-dialog="dialog-delete-order" aria-label="ปิดหน้าต่าง">✕ ปิด</button>
+    </div>
+    <form id="admin-delete-order-form" class="dialog-body">
+      <input type="hidden" id="delete-order-id">
+
+      <div id="delete-order-summary-box" class="highlight-box" style="margin-block-end:1rem; padding:0.85rem 1rem; border-color:rgba(244,63,94,0.45); background:rgba(244,63,94,0.08);"></div>
+
+      <div class="field">
+        <label for="delete-order-reason">ระบุเหตุผลที่ลบ / ยกเลิกคำสั่งซื้อ (จะไปแสดงในหน้าออเดอร์ของลูกค้า) *</label>
+        <span class="hint">คลิกเลือกเหตุผลด่วนด้านล่าง หรือพิมพ์ข้อความแจ้งลูกค้าด้วยตนเอง</span>
+        <div id="delete-reason-presets" style="display:flex; flex-wrap:wrap; gap:0.4rem; margin-block:0.45rem 0.65rem;">
+          <button type="button" class="preset-chip" data-reason-preset="สลิปโอนเงินไม่ถูกต้อง หรือยอดโอนไม่ตรงตามรายการ">สลิปไม่ถูกต้อง/ยอดไม่ตรง</button>
+          <button type="button" class="preset-chip" data-reason-preset="สินค้าหรือแผ่นเกมหมดสต็อกชั่วคราว (ทางร้านดำเนินการโอนเงินคืนให้ลูกค้า)">สินค้าหมดสต็อก (โอนเงินคืน)</button>
+          <button type="button" class="preset-chip" data-reason-preset="ลูกค้าแจ้งขอยกเลิกคำสั่งซื้อด้วยตนเอง">ลูกค้าแจ้งขอยกเลิก</button>
+          <button type="button" class="preset-chip" data-reason-preset="ทำรายการสั่งซื้อซ้ำซ้อน (Duplicate Order)">รายการสั่งซื้อซ้ำซ้อน</button>
+          <button type="button" class="preset-chip" data-reason-preset="ข้อมูลที่อยู่จัดส่งหรือเบอร์โทรศัพท์ติดต่อไม่ครบถ้วน">ข้อมูลติดต่อไม่ครบถ้วน</button>
+        </div>
+        <textarea
+          id="delete-order-reason"
+          rows="3"
+          required
+          placeholder="เช่น สลิปโอนเงินไม่ถูกต้อง กรุณาติดต่อแอดมินทาง LINE หรือทำรายการเข้ามาใหม่ครับ..."
+        ></textarea>
+        <div class="error-msg">กรุณาระบุเหตุผลการลบคำสั่งซื้อเพื่อแจ้งให้ลูกค้าทราบ</div>
+      </div>
+
+      <label style="display:flex; align-items:center; gap:0.55rem; font-size:0.85rem; color:var(--text-primary); cursor:pointer; margin-block-end:0.5rem;">
+        <input type="checkbox" id="delete-order-restore-stock" checked style="inline-size:18px; block-size:18px;">
+        <span>🔄 คืนจำนวนสต็อกสินค้า/แผ่นเกมของออเดอร์นี้กลับเข้าร้านอัตโนมัติ</span>
+      </label>
+
+      <div style="font-size:0.78rem; color:var(--text-muted); margin-block-end:1rem;">
+        * ระบบจะลบข้อมูลออเดอร์นี้ออกจากตารางคำสั่งซื้อของแอดมินและลบแถวออกจาก Google Sheets ทันที พร้อมส่งเหตุผลด้านบนไปแสดงแจ้งเตือนในหน้าเช็คสถานะคำสั่งซื้อของลูกค้า
+      </div>
+
+      <div class="dialog-footer" style="padding-inline:0; padding-block-end:0; background:transparent;">
+        <button type="button" class="btn btn-outline" data-close-dialog="dialog-delete-order">ยกเลิก</button>
+        <button type="submit" class="btn btn-danger">🗑️ ยืนยันลบข้อมูล &amp; แจ้งเหตุผลลูกค้า</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Toast Container -->
   <div id="toast-container" class="toast-container" aria-live="polite"></div>
 
   <!-- HEIC/HEIF image decoder for Apple iPhone photos in Chrome & other browsers -->
   <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js" defer></script>
-  <script src="app.js?v=20261113-contract1" defer></script>
+  <script src="app.js?v=20261113-delorder1" defer></script>
 </body>
 </html>
 

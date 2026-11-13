@@ -690,13 +690,17 @@ async function initCloudConnection() {
         });
       }
       for (const localOrd of state.orders) {
-        if (localOrd && localOrd.id && !orderMap.has(localOrd.id)) {
+        if (!localOrd || !localOrd.id) continue;
+        const cloudOrd = orderMap.get(localOrd.id);
+        const localTime = Number(localOrd.updatedAtMs || 0);
+        const cloudTime = Number(cloudOrd?.updatedAtMs || 0);
+        if (!cloudOrd || localTime > cloudTime) {
           orderMap.set(localOrd.id, localOrd);
           fsMod.setDoc(fsMod.doc(db, 'takeit_orders', localOrd.id), localOrd).catch(() => {});
         }
       }
       if (orderMap.size > 0) {
-        const mergedOrders = Array.from(orderMap.values());
+        const mergedOrders = Array.from(orderMap.values()).filter((o) => !o.permanentlyErased);
         mergedOrders.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
         state.orders = mergedOrders;
       }
@@ -726,15 +730,28 @@ async function initCloudConnection() {
         });
 
         const unsubOrd = fsMod.onSnapshot(fsMod.collection(db, 'takeit_orders'), (snap) => {
-          if (snap.empty) return;
+          const localMap = new Map((state.orders || []).map((o) => [o.id, o]));
           const liveOrders = [];
-          snap.forEach((d) => liveOrders.push(d.data()));
+          snap.forEach((d) => {
+            const cloudOrd = d.data();
+            const localOrd = localMap.get(cloudOrd.id);
+            const picked = (localOrd && Number(localOrd.updatedAtMs || 0) > Number(cloudOrd.updatedAtMs || 0))
+              ? localOrd
+              : cloudOrd;
+            if (!picked.permanentlyErased) {
+              liveOrders.push(picked);
+            }
+          });
           liveOrders.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
           state.orders = liveOrders;
           saveStateLocally();
           if (state.isAdmin) {
             renderAdminStats();
             renderAdminOrdersTable();
+          }
+          const lookupDlg = document.getElementById('dialog-order-lookup');
+          if (lookupDlg && lookupDlg.open) {
+            refreshOpenOrderLookupModal();
           }
         });
 
@@ -883,9 +900,63 @@ async function syncSupabaseKeyValue(key, value) {
   }
 }
 
-// ============================================================================
-// Google Sheets Integration (Webhook + CSV/Excel Export)
-// ============================================================================
+async function deleteOrderFromCloud(orderId) {
+  if (state.settings.cloudProvider === 'firebase') {
+    if (!state.firestoreDb || !state.firebaseModules) {
+      await initCloudConnection();
+    }
+    if (state.firestoreDb && state.firebaseModules) {
+      try {
+        const { doc, deleteDoc } = state.firebaseModules;
+        await deleteDoc(doc(state.firestoreDb, 'takeit_orders', orderId));
+      } catch (err) {
+        console.error('Firestore delete order error:', err);
+      }
+    }
+  } else if (state.settings.cloudProvider === 'supabase' && state.settings.supabaseUrl && state.settings.supabaseKey) {
+    await syncSupabaseKeyValue('orders', state.orders);
+  }
+}
+
+async function deleteOrderFromGoogleSheet(orderId, reason = '') {
+  const webhookUrl = getValidSheetWebhookUrl();
+  if (!webhookUrl || !orderId) return false;
+
+  // 1. Send delete_order action (supported by updated google-apps-script.gs to deleteRow)
+  await postPayloadToGoogleSheet(webhookUrl, {
+    action: 'delete_order',
+    orderId
+  });
+
+  // 2. Also send sync_order with _deleteFromSheet: true and cleared customer fields so even if Apps Script hasn't been re-deployed yet, the row in Google Sheets is wiped/marked deleted immediately
+  return postPayloadToGoogleSheet(webhookUrl, {
+    action: 'sync_order',
+    order: {
+      id: orderId,
+      originalOrderId: orderId,
+      isDeletedByAdmin: true,
+      _deleteFromSheet: true,
+      createdAtFormatted: '-',
+      orderTypeLabel: '🗑️ ลบรายการแล้ว',
+      customer: {
+        name: '[ลบข้อมูลลูกค้าแล้ว]',
+        phone: '',
+        lineId: '-',
+        address: '[ลบข้อมูลออกจากระบบแล้ว]',
+        note: `เหตุผลที่แอดมินลบ: ${reason || '-'}`
+      },
+      items: [],
+      buySubtotal: 0,
+      rentSubtotal: 0,
+      depositSubtotal: 0,
+      shippingFee: 0,
+      grandTotal: 0,
+      status: 'ลบคำสั่งซื้อแล้ว',
+      statusLabel: `🗑️ ลบแล้ว (${reason || '-'})`,
+      slipNote: '-'
+    }
+  });
+}
 function getValidSheetWebhookUrl() {
   const raw = (state.settings.sheetWebhookUrl || '').trim();
   if (raw && raw.includes('script.google.com/macros/s/')) {
@@ -1004,8 +1075,9 @@ async function sendOrderToGoogleSheet(order, action = 'create_order') {
 
 async function autoSyncOrdersToGoogleSheetSilent() {
   const webhookUrl = getValidSheetWebhookUrl();
-  if (!webhookUrl || !state.orders.length) return;
-  const cleanOrders = state.orders.map(buildSheetOrderPayload);
+  const activeOrders = state.orders.filter((o) => !o.isDeletedByAdmin && !o.permanentlyErased);
+  if (!webhookUrl || !activeOrders.length) return;
+  const cleanOrders = activeOrders.map(buildSheetOrderPayload);
   await postPayloadToGoogleSheet(webhookUrl, {
     action: 'sync_all_orders',
     orders: cleanOrders
@@ -1020,18 +1092,20 @@ async function syncAllOrdersToGoogleSheet() {
     return;
   }
 
-  const cleanOrders = state.orders.map(buildSheetOrderPayload);
+  const activeOrders = state.orders.filter((o) => !o.isDeletedByAdmin && !o.permanentlyErased);
+  const cleanOrders = activeOrders.map(buildSheetOrderPayload);
   const ok = await postPayloadToGoogleSheet(webhookUrl, {
     action: 'sync_all_orders',
     orders: cleanOrders
   });
   if (ok) {
-    showToast(`📊 ส่งข้อมูลคำสั่งซื้อทั้งหมด (${cleanOrders.length} รายการ) เข้า Google Sheets เรียบร้อยแล้ว!`);
+    showToast(`📊 ส่งข้อมูลคำสั่งซื้อที่ใช้งานอยู่ (${cleanOrders.length} รายการ) เข้า Google Sheets เรียบร้อยแล้ว!`);
   }
 }
 
 function exportOrdersToCsvSheet() {
-  if (!state.orders.length) {
+  const activeOrders = state.orders.filter((o) => !o.isDeletedByAdmin && !o.permanentlyErased);
+  if (!activeOrders.length) {
     showToast('ยังไม่มีรายการคำสั่งซื้อสำหรับดาวน์โหลด', 'warning');
     return;
   }
@@ -1059,7 +1133,7 @@ function exportOrdersToCsvSheet() {
     return `"${str}"`;
   };
 
-  const rows = state.orders.map((o) => {
+  const rows = activeOrders.map((o) => {
     const itemSummary = (o.items || []).map((item, i) => {
       if (item.mode === 'rent') {
         return `${i + 1}. [เช่าแผ่น] ${item.name} (${item.platform}) x${item.qty} | เช่า ${item.rentDays} วัน (${item.rentRate}บ./วัน = ${item.rentRate * item.rentDays * item.qty}บ.) + มัดจำ ${item.deposit * item.qty}บ. (เริ่ม ${item.rentStartDate} คืน ${item.rentEndDate})`;
@@ -1995,10 +2069,11 @@ function renderAdminVisibility() {
 }
 
 function renderAdminStats() {
+  const activeOrders = state.orders.filter((o) => !o.isDeletedByAdmin && !o.permanentlyErased);
   document.getElementById('stat-total-products').textContent = String(state.products.length);
   document.getElementById('stat-rentable-products').textContent = String(state.products.filter((p) => p.canRent).length);
-  document.getElementById('stat-total-orders').textContent = String(state.orders.length);
-  const totalRev = state.orders
+  document.getElementById('stat-total-orders').textContent = String(activeOrders.length);
+  const totalRev = activeOrders
     .filter((o) => o.status !== 'ยกเลิกรายการ')
     .reduce((sum, o) => sum + Number(o.grandTotal || 0), 0);
   document.getElementById('stat-total-revenue').textContent = formatTHB(totalRev);
@@ -2009,7 +2084,8 @@ function renderAdminOrdersTable() {
   if (!tbody) return;
 
   const statusFilter = document.getElementById('admin-order-filter')?.value || 'all';
-  const list = state.orders.filter((o) => statusFilter === 'all' || o.status === statusFilter);
+  const activeOrders = state.orders.filter((o) => !o.isDeletedByAdmin && !o.permanentlyErased);
+  const list = activeOrders.filter((o) => statusFilter === 'all' || o.status === statusFilter);
 
   if (list.length === 0) {
     tbody.innerHTML = `
@@ -2150,13 +2226,44 @@ function renderAdminOrdersTable() {
   tbody.querySelectorAll('[data-delete-order]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const id = btn.getAttribute('data-delete-order');
-      state.orders = state.orders.filter((o) => o.id !== id);
-      saveStateLocally();
-      renderAdminStats();
-      renderAdminOrdersTable();
-      showToast(`🗑️ ลบรายการออเดอร์ ${id} แล้ว`);
+      openAdminDeleteOrderModal(id);
     });
   });
+}
+
+function openAdminDeleteOrderModal(orderId) {
+  const ord = state.orders.find((o) => o.id === orderId);
+  if (!ord) return;
+
+  const dlg = document.getElementById('dialog-delete-order');
+  const idInput = document.getElementById('delete-order-id');
+  const summaryBox = document.getElementById('delete-order-summary-box');
+  const reasonInput = document.getElementById('delete-order-reason');
+  const restoreCheck = document.getElementById('delete-order-restore-stock');
+
+  if (idInput) idInput.value = ord.id;
+  if (reasonInput) reasonInput.value = '';
+  if (restoreCheck) restoreCheck.checked = true;
+
+  document.querySelectorAll('#delete-reason-presets .preset-chip').forEach((chip) => {
+    chip.classList.remove('active');
+  });
+
+  if (summaryBox) {
+    const itemNames = (ord.items || []).map((i) => `${i.name} (x${i.qty})`).join(', ');
+    summaryBox.innerHTML = `
+      <div style="font-weight:800; color:#fda4af; font-size:0.95rem; margin-block-end:0.25rem;">
+        คำสั่งซื้อรหัส: ${escapeXml(ord.id)} (${escapeXml(ord.contractNo || ('CTR-' + ord.id))})
+      </div>
+      <div style="font-size:0.84rem; color:var(--text-primary);">
+        👤 ลูกค้า: <strong>${escapeXml(ord.customer?.name || '-')}</strong> (${escapeXml(ord.customer?.phone || '-')})<br>
+        🎮 รายการ: ${escapeXml(itemNames || '-')}<br>
+        💰 ยอดชำระสุทธิ: <strong style="color:#34d399;">${formatTHB(ord.grandTotal)}</strong>
+      </div>
+    `;
+  }
+
+  dlg?.showModal();
 }
 
 function renderAdminProductsTable() {
@@ -2558,10 +2665,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!container) return;
 
     if (state.currentUser) {
-      // Find orders belonging to the logged-in user
+      // Find orders belonging to the logged-in user (including deleted orders so customer sees the Admin's reason)
       const myOrders = state.orders.filter((o) =>
-        (o.customerUid && o.customerUid === state.currentUser.uid) ||
-        (o.customerEmail && o.customerEmail.toLowerCase() === state.currentUser.email.toLowerCase())
+        !o.permanentlyErased && (
+          (o.customerUid && o.customerUid === state.currentUser.uid) ||
+          (o.customerEmail && o.customerEmail.toLowerCase() === state.currentUser.email.toLowerCase())
+        )
       );
 
       if (myOrders.length > 0) {
@@ -2612,6 +2721,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const qDigits = rawQ.replace(/\D/g, '');
 
     const matches = state.orders.filter((o) => {
+      if (o.permanentlyErased) return false;
       const idMatch = o.id && o.id.toLowerCase().includes(qLower);
       const phoneDigits = (o.customer?.phone || '').replace(/\D/g, '');
       const phoneMatch = qDigits.length >= 3 && phoneDigits.includes(qDigits);
@@ -2619,6 +2729,71 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     renderOrderLookupList(matches, false, false, rawQ);
+  });
+
+  // Admin Delete Order Modal preset chips & form submission
+  document.querySelectorAll('#delete-reason-presets [data-reason-preset]').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      document.querySelectorAll('#delete-reason-presets .preset-chip').forEach((c) => c.classList.remove('active'));
+      chip.classList.add('active');
+      const reasonInput = document.getElementById('delete-order-reason');
+      if (reasonInput) {
+        reasonInput.value = chip.getAttribute('data-reason-preset') || '';
+        reasonInput.focus();
+      }
+    });
+  });
+
+  document.getElementById('admin-delete-order-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const orderId = document.getElementById('delete-order-id')?.value;
+    const reason = (document.getElementById('delete-order-reason')?.value || '').trim();
+    const restoreStock = document.getElementById('delete-order-restore-stock')?.checked;
+
+    if (!orderId || !reason) {
+      showToast('กรุณาระบุเหตุผลการลบคำสั่งซื้อเพื่อแจ้งให้ลูกค้าทราบครับ', 'warning');
+      return;
+    }
+
+    const ord = state.orders.find((o) => o.id === orderId);
+    if (!ord) return;
+
+    // 1. Restore product stock if requested and not already restored
+    if (restoreStock && !ord.stockRestored) {
+      for (const item of (ord.items || [])) {
+        const prod = state.products.find((p) => p.id === item.productId);
+        if (prod) {
+          prod.stock = Number(prod.stock || 0) + Number(item.qty || 1);
+          prod.updatedAtMs = Date.now();
+          await saveProductToCloud(prod);
+        }
+      }
+      ord.stockRestored = true;
+    }
+
+    // 2. Mark order as deleted by Admin, wipe sensitive personal data (address/slip/line/notes), and attach deletion reason for customer's order lookup
+    const nowStr = new Date().toLocaleString('th-TH');
+    ord.isDeletedByAdmin = true;
+    ord.deleteReason = reason;
+    ord.deletedAt = nowStr;
+    ord.updatedAtMs = Date.now();
+    ord.status = 'คำสั่งซื้อถูกลบ/ยกเลิกโดยแอดมิน';
+    ord.statusLabel = `ลบคำสั่งซื้อแล้ว (${reason})`;
+    ord.slipDataUrl = '';
+    if (ord.customer) {
+      ord.customer.address = '[ลบข้อมูลที่อยู่จัดส่งออกจากระบบแล้ว]';
+      ord.customer.lineId = '-';
+      ord.customer.note = '';
+    }
+
+    // 3. Persist to LocalStorage, Firebase Firestore, and delete from Google Sheets
+    saveStateLocally();
+    await saveOrderToCloud(ord);
+    await deleteOrderFromGoogleSheet(orderId, reason);
+
+    document.getElementById('dialog-delete-order')?.close();
+    renderAll();
+    showToast(`🗑️ ลบออเดอร์ ${orderId} ออกจากระบบและชีต พร้อมส่งเหตุผลแจ้งเตือนไปที่หน้าออเดอร์ลูกค้าแล้ว!`);
   });
 
   // Admin Login & Logout
@@ -2965,6 +3140,36 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
+function refreshOpenOrderLookupModal() {
+  const input = document.getElementById('order-lookup-input');
+  const rawQ = (input?.value || '').trim();
+  if (rawQ.length >= 3) {
+    const qLower = rawQ.toLowerCase();
+    const qDigits = rawQ.replace(/\D/g, '');
+    const matches = state.orders.filter((o) => {
+      if (o.permanentlyErased) return false;
+      const idMatch = o.id && o.id.toLowerCase().includes(qLower);
+      const phoneDigits = (o.customer?.phone || '').replace(/\D/g, '');
+      const phoneMatch = qDigits.length >= 3 && phoneDigits.includes(qDigits);
+      return idMatch || phoneMatch;
+    });
+    renderOrderLookupList(matches, false, false, rawQ);
+    return;
+  }
+
+  if (state.currentUser) {
+    const myOrders = state.orders.filter((o) =>
+      !o.permanentlyErased && (
+        (o.customerUid && o.customerUid === state.currentUser.uid) ||
+        (o.customerEmail && o.customerEmail.toLowerCase() === state.currentUser.email.toLowerCase())
+      )
+    );
+    if (myOrders.length > 0) {
+      renderOrderLookupList(myOrders, false, false, '', true);
+    }
+  }
+}
+
 function showOrderReceiptModal(order, sentToSheet) {
   const dlg = document.getElementById('dialog-order-lookup');
   document.getElementById('order-lookup-input').value = order.id;
@@ -2976,7 +3181,9 @@ function renderOrderLookupList(orders, isNewOrder = false, sentToSheet = false, 
   const container = document.getElementById('order-lookup-results');
   if (!container) return;
 
-  if (!orders || orders.length === 0) {
+  const visibleOrders = (orders || []).filter((o) => !o.permanentlyErased);
+
+  if (visibleOrders.length === 0) {
     container.innerHTML = `
       <div style="text-align:center; padding:2rem 1rem; color:var(--text-muted); background:rgba(15,23,42,0.4); border-radius:var(--radius-md); border:1px solid var(--border-subtle);">
         <div style="font-size:2rem; margin-block-end:0.4rem;">❓</div>
@@ -2992,7 +3199,7 @@ function renderOrderLookupList(orders, isNewOrder = false, sentToSheet = false, 
       <div style="background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.35); padding:0.85rem 1rem; border-radius:var(--radius-sm); margin-block-end:1rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
         <div>
           <strong style="color:var(--accent-cyan); display:block;">👋 บัญชี: ${escapeXml(state.currentUser?.displayName || '')} (${escapeXml(state.currentUser?.email || '')})</strong>
-          <span style="font-size:0.82rem; color:var(--text-secondary);">พบประวัติคำสั่งซื้อและสัญญาอิเล็กทรอนิกส์ของคุณทั้งหมด ${orders.length} รายการ</span>
+          <span style="font-size:0.82rem; color:var(--text-secondary);">พบประวัติคำสั่งซื้อและสัญญาอิเล็กทรอนิกส์ของคุณทั้งหมด ${visibleOrders.length} รายการ</span>
         </div>
         <span class="badge badge-cyan">ล็อกอินด้วย Gmail แล้ว</span>
       </div>
@@ -3006,11 +3213,11 @@ function renderOrderLookupList(orders, isNewOrder = false, sentToSheet = false, 
           <div>
             <h3 style="margin:0 0 0.25rem; color:#34d399;">🎉 สั่งซื้อ / เช่าแผ่นเกม และสร้างสัญญาอัตโนมัติสำเร็จ!</h3>
             <p style="margin:0; font-size:0.86rem; color:var(--text-secondary);">
-              รหัสคำสั่งซื้อ: <strong>${escapeXml(orders[0].id)}</strong> • เลขที่สัญญา: <strong>${escapeXml(orders[0].contractNo || ('CTR-' + orders[0].id))}</strong>
+              รหัสคำสั่งซื้อ: <strong>${escapeXml(visibleOrders[0].id)}</strong> • เลขที่สัญญา: <strong>${escapeXml(visibleOrders[0].contractNo || ('CTR-' + visibleOrders[0].id))}</strong>
               ${sentToSheet ? '(บันทึกข้อมูลลง Google Sheets เรียบร้อยแล้ว)' : '(บันทึกเข้าระบบร้าน TakeIT เรียบร้อยแล้ว)'}
             </p>
           </div>
-          <button type="button" class="btn btn-primary btn-sm" data-view-contract="${escapeXml(orders[0].id)}" data-unmasked="true">
+          <button type="button" class="btn btn-primary btn-sm" data-view-contract="${escapeXml(visibleOrders[0].id)}" data-unmasked="true">
             📜 เปิดดู / พิมพ์สัญญาฉบับเต็ม
           </button>
         </div>
@@ -3018,7 +3225,7 @@ function renderOrderLookupList(orders, isNewOrder = false, sentToSheet = false, 
     `
     : '';
 
-  container.innerHTML = myOrdersHeader + bannerHtml + orders.map((o) => {
+  container.innerHTML = myOrdersHeader + bannerHtml + visibleOrders.map((o) => {
     const qNorm = String(searchQuery || '').trim().toLowerCase();
     const qDigits = String(searchQuery || '').replace(/\D/g, '');
     const orderPhoneDigits = String(o.customer?.phone || '').replace(/\D/g, '');
@@ -3036,6 +3243,7 @@ function renderOrderLookupList(orders, isNewOrder = false, sentToSheet = false, 
     const displayName = isOwner ? (o.customer?.name || '-') : maskCustomerName(o.customer?.name);
     const displayPhone = isOwner ? (o.customer?.phone || '-') : maskPhone(o.customer?.phone);
     const contractMeta = getContractMetadata(o);
+    const isDeleted = Boolean(o.isDeletedByAdmin);
 
     const itemsList = (o.items || []).map((item) => {
       if (item.mode === 'rent') {
@@ -3044,25 +3252,32 @@ function renderOrderLookupList(orders, isNewOrder = false, sentToSheet = false, 
       return `<li>[ซื้อขาด] <strong>${escapeXml(item.name)}</strong> (${escapeXml(item.platform)}) x${item.qty} — ${formatTHB(item.price * item.qty)}</li>`;
     }).join('');
 
-    return `
-      <div class="highlight-box" style="margin-block-end:0.85rem;">
-        <div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:0.5rem; border-block-end:1px solid var(--border-subtle); padding-block-end:0.5rem; margin-block-end:0.6rem;">
-          <div>
-            <strong>รหัสออเดอร์: <span style="color:var(--accent-cyan);">${escapeXml(o.id)}</span></strong>
-            <span style="font-size:0.78rem; color:var(--text-muted); margin-inline-start:0.5rem;">(เลขที่สัญญา: ${escapeXml(contractMeta.contractNo)})</span>
+    const deletedNoticeHtml = isDeleted
+      ? `
+        <div style="background:rgba(244,63,94,0.16); border:1px solid rgba(244,63,94,0.55); border-radius:8px; padding:0.8rem 0.95rem; margin-block-end:0.65rem;">
+          <div style="font-weight:800; color:#fda4af; font-size:0.9rem; margin-block-end:0.25rem;">
+            ⚠️ คำสั่งซื้อนี้ถูกยกเลิกและลบออกจากระบบโดยผู้ดูแลร้าน (Admin)
           </div>
-          <span class="badge badge-emerald">${escapeXml(o.status || 'รอตรวจสอบสลิป')}</span>
+          <div style="font-size:0.9rem; color:#ffffff; line-height:1.5;">
+            📌 <strong>เหตุผลจากแอดมิน:</strong> <span style="color:#fde047; font-weight:700;">"${escapeXml(o.deleteReason || 'ไม่ระบุเหตุผล')}"</span>
+          </div>
+          <div style="font-size:0.76rem; color:#fda4af; margin-block-top:0.3rem;">
+            🕒 ดำเนินการเมื่อ: ${escapeXml(o.deletedAt || '-')} • ข้อมูลคำสั่งซื้อในระบบและสัญญาเช่า/ซื้อขายถูกยกเลิกเรียบร้อยแล้ว
+          </div>
         </div>
-        <div style="font-size:0.85rem; color:var(--text-secondary); margin-block-end:0.5rem;">
-          ผู้ทำสัญญา/ผู้รับ: <strong>${escapeXml(displayName)}</strong> (${escapeXml(displayPhone)}) • วันที่ทำสัญญา: ${escapeXml(o.createdAtFormatted)}
+      `
+      : '';
+
+    const footerActionsHtml = isDeleted
+      ? `
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem; flex-wrap:wrap; margin-block-top:0.65rem; padding-block-top:0.6rem; border-block-start:1px dashed rgba(244,63,94,0.4);">
+          <span style="font-size:0.78rem; color:#fda4af;">คุณสามารถกดรับทราบเพื่อลบรายการแจ้งเตือนนี้ออกจากหน้าประวัติได้ทันที</span>
+          <button type="button" class="btn btn-danger btn-sm" data-ack-deleted-order="${escapeXml(o.id)}">
+            🗑️ รับทราบและลบออกจากประวัติออเดอร์
+          </button>
         </div>
-        <ul style="margin:0 0 0.65rem; padding-inline-start:1.2rem; font-size:0.85rem;">
-          ${itemsList}
-        </ul>
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; font-size:0.9rem; padding-block-start:0.5rem; border-block-start:1px solid var(--border-subtle);">
-          <span>รวมมัดจำแผ่นที่จะได้รับคืน: <strong style="color:#fcd34d;">${formatTHB(o.depositSubtotal)}</strong> <span style="font-size:0.8rem; color:#34d399;">(ค่าส่งของกลับตอนคืนแผ่น ทางร้านจ่ายให้)</span></span>
-          <strong style="color:#34d399; font-size:1.05rem;">ยอดชำระสุทธิ: ${formatTHB(o.grandTotal)}</strong>
-        </div>
+      `
+      : `
         <div style="display:flex; justify-content:flex-end; gap:0.5rem; flex-wrap:wrap; margin-block-top:0.65rem; padding-block-top:0.6rem; border-block-start:1px dashed var(--border-subtle);">
           <button type="button" class="btn btn-outline btn-sm" data-view-contract="${escapeXml(o.id)}" data-unmasked="${isOwner ? 'true' : 'false'}">
             📜 เปิดดู${escapeXml(contractMeta.shortLabel)}
@@ -3071,15 +3286,56 @@ function renderOrderLookupList(orders, isNewOrder = false, sentToSheet = false, 
             🖨️ พิมพ์สัญญา / บันทึก PDF
           </button>
         </div>
+      `;
+
+    return `
+      <div class="highlight-box" style="margin-block-end:0.85rem; ${isDeleted ? 'border-color:rgba(244,63,94,0.65); background:rgba(244,63,94,0.06);' : ''}">
+        <div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:0.5rem; border-block-end:1px solid var(--border-subtle); padding-block-end:0.5rem; margin-block-end:0.6rem;">
+          <div>
+            <strong>รหัสออเดอร์: <span style="color:${isDeleted ? '#fda4af' : 'var(--accent-cyan)'}; ${isDeleted ? 'text-decoration:line-through;' : ''}">${escapeXml(o.id)}</span></strong>
+            <span style="font-size:0.78rem; color:var(--text-muted); margin-inline-start:0.5rem;">(เลขที่สัญญา: ${escapeXml(contractMeta.contractNo)})</span>
+          </div>
+          <span class="badge" style="${isDeleted ? 'background:rgba(244,63,94,0.22); color:#fda4af; border:1px solid rgba(244,63,94,0.5);' : ''}">${isDeleted ? '❌ ถูกลบ/ยกเลิกโดยแอดมิน' : escapeXml(o.status || 'รอตรวจสอบสลิป')}</span>
+        </div>
+        ${deletedNoticeHtml}
+        <div style="font-size:0.85rem; color:var(--text-secondary); margin-block-end:0.5rem;">
+          ผู้ทำสัญญา/ผู้รับ: <strong>${escapeXml(displayName)}</strong> (${escapeXml(displayPhone)}) • วันที่ทำรายการ: ${escapeXml(o.createdAtFormatted)}
+        </div>
+        <ul style="margin:0 0 0.65rem; padding-inline-start:1.2rem; font-size:0.85rem; ${isDeleted ? 'opacity:0.72;' : ''}">
+          ${itemsList}
+        </ul>
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; font-size:0.9rem; padding-block-start:0.5rem; border-block-start:1px solid var(--border-subtle);">
+          <span>รวมมัดจำแผ่น: <strong style="color:#fcd34d;">${formatTHB(o.depositSubtotal)}</strong></span>
+          <strong style="color:${isDeleted ? '#fda4af' : '#34d399'}; font-size:1.05rem;">ยอดสุทธิ: ${formatTHB(o.grandTotal)}</strong>
+        </div>
+        ${footerActionsHtml}
       </div>
     `;
   }).join('');
+
+  container.querySelectorAll('[data-ack-deleted-order]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.getAttribute('data-ack-deleted-order');
+      const ord = state.orders.find((o) => o.id === id);
+      if (ord) {
+        ord.permanentlyErased = true;
+        ord.updatedAtMs = Date.now();
+        await saveOrderToCloud(ord);
+        await deleteOrderFromCloud(id);
+      }
+      state.orders = state.orders.filter((o) => o.id !== id);
+      saveStateLocally();
+      const remaining = visibleOrders.filter((o) => o.id !== id);
+      renderOrderLookupList(remaining, false, false, searchQuery, isMyOrders);
+      showToast('🗑️ ลบรายการออกจากประวัติคำสั่งซื้อเรียบร้อยแล้ว');
+    });
+  });
 
   container.querySelectorAll('[data-view-contract]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const id = btn.getAttribute('data-view-contract');
       const unmasked = btn.getAttribute('data-unmasked') === 'true';
-      const ord = orders.find((o) => o.id === id) || state.orders.find((o) => o.id === id);
+      const ord = visibleOrders.find((o) => o.id === id) || state.orders.find((o) => o.id === id);
       if (ord) openOrderContractModal(ord, { unmasked, isDraft: false });
     });
   });
@@ -3088,7 +3344,7 @@ function renderOrderLookupList(orders, isNewOrder = false, sentToSheet = false, 
     btn.addEventListener('click', () => {
       const id = btn.getAttribute('data-print-contract');
       const unmasked = btn.getAttribute('data-unmasked') === 'true';
-      const ord = orders.find((o) => o.id === id) || state.orders.find((o) => o.id === id);
+      const ord = visibleOrders.find((o) => o.id === id) || state.orders.find((o) => o.id === id);
       if (ord) {
         openOrderContractModal(ord, { unmasked, isDraft: false });
         setTimeout(() => printActiveContract(), 150);
