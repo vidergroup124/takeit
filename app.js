@@ -379,12 +379,42 @@ function getProductImages(p) {
   return [fallback];
 }
 
+function getProductShippingFee(product) {
+  if (!product) return Number(state.settings?.shippingFee ?? 60);
+  if (product.shippingFee !== undefined && product.shippingFee !== null && product.shippingFee !== '') {
+    const val = Number(product.shippingFee);
+    if (!Number.isNaN(val) && val >= 0) return val;
+  }
+  if (product.category === 'console') return 150;
+  if (product.category === 'disc') return 50;
+  if (product.category === 'it_other') return 80;
+  return Number(state.settings?.shippingFee ?? 60);
+}
+
+function getCartItemShippingFeePerUnit(item, preferSnapshot = false) {
+  if (!item) return 0;
+  if (preferSnapshot && item.shippingFee !== undefined && item.shippingFee !== null && item.shippingFee !== '') {
+    const snapVal = Number(item.shippingFee);
+    if (!Number.isNaN(snapVal) && snapVal >= 0) return snapVal;
+  }
+  const prod = state.products.find((p) => p.id === item.productId);
+  if (prod) {
+    return getProductShippingFee(prod);
+  }
+  if (item.shippingFee !== undefined && item.shippingFee !== null && item.shippingFee !== '') {
+    const val = Number(item.shippingFee);
+    if (!Number.isNaN(val) && val >= 0) return val;
+  }
+  return Number(state.settings?.shippingFee ?? 60);
+}
+
 function ensureProductGalleryImages(products) {
   if (!Array.isArray(products)) return [];
   return products.map((p) => {
     const cleaned = getProductImages(p);
     return {
       ...p,
+      shippingFee: getProductShippingFee(p),
       image: cleaned[0],
       images: cleaned
     };
@@ -1050,6 +1080,7 @@ function buildSheetOrderPayload(order) {
       mode: item.mode || 'buy',
       qty: Number(item.qty || 1),
       price: Number(item.price || 0),
+      shippingFee: Number(item.shippingFee ?? 0),
       rentDays: Number(item.rentDays || 0),
       rentRate: Number(item.rentRate || 0),
       deposit: Number(item.deposit || 0),
@@ -1666,6 +1697,10 @@ function renderStorefront() {
               <span style="font-size:0.82rem; color:var(--text-muted);">ราคาซื้อขาด:</span>
               <span class="price-buy">${Number(p.price) > 0 ? formatTHB(p.price) : 'เช่าอย่างเดียว'}</span>
             </div>
+            <div class="price-row" style="margin-block-top:0.2rem; font-size:0.78rem;">
+              <span style="color:var(--text-muted);">🚚 ค่าจัดส่งสินค้าชิ้นนี้:</span>
+              <strong style="color:${getProductShippingFee(p) === 0 ? '#34d399' : '#38bdf8'};">${getProductShippingFee(p) === 0 ? 'ส่งฟรี! (฿0)' : `${formatTHB(getProductShippingFee(p))} / ชิ้น`}</strong>
+            </div>
             ${rentSectionHtml}
           </div>
 
@@ -1818,6 +1853,9 @@ function openProductGalleryModal(productId, startIndex = 0) {
       <div style="flex:1; min-inline-size:240px;">
         <span class="platform-pill platform-${escapeXml(product.platform)}">${escapeXml(product.platform)}</span>
         <strong style="margin-inline-start:0.5rem; font-size:1.05rem;">${escapeXml(product.name)}</strong>
+        <span class="badge" style="margin-inline-start:0.4rem; background:rgba(56,189,248,0.16); color:#38bdf8;">
+          🚚 ค่าส่ง: ${getProductShippingFee(product) === 0 ? 'ส่งฟรี!' : `${formatTHB(getProductShippingFee(product))}/ชิ้น`}
+        </span>
         <p style="margin:0.4rem 0 0; font-size:0.88rem; color:var(--text-secondary);">${escapeXml(product.description || '')}</p>
       </div>
       <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
@@ -1930,12 +1968,18 @@ function updateRentalCalculatorBreakdown() {
 
   const rentFee = Number(product.rentPricePerDay || 0) * days * qty;
   const depositFee = Number(product.rentDeposit || 0) * qty;
-  const total = rentFee + depositFee;
+  const unitShipFee = getProductShippingFee(product);
+  const shipFee = unitShipFee * qty;
+  const total = rentFee + depositFee + shipFee;
 
   document.getElementById('calc-rate-display').textContent = `${formatTHB(product.rentPricePerDay)} / วัน`;
   document.getElementById('calc-days-display').textContent = `${days} วัน × ${qty} แผ่น`;
   document.getElementById('calc-rent-fee-display').textContent = formatTHB(rentFee);
   document.getElementById('calc-deposit-display').textContent = formatTHB(depositFee);
+  const shipEl = document.getElementById('calc-shipping-display');
+  if (shipEl) {
+    shipEl.textContent = shipFee === 0 ? 'ส่งฟรี! (฿0)' : `${formatTHB(shipFee)} (${formatTHB(unitShipFee)}/แผ่น)`;
+  }
   document.getElementById('calc-return-date-display').textContent = `${formatThaiDate(returnDate)} (เริ่ม ${formatThaiDate(startDate)})`;
   document.getElementById('calc-total-display').textContent = formatTHB(total);
 }
@@ -1947,9 +1991,11 @@ function addToCartBuy(productId) {
   const product = state.products.find((p) => p.id === productId);
   if (!product) return;
 
+  const unitShippingFee = getProductShippingFee(product);
   const existing = state.cart.find((item) => item.productId === productId && item.mode === 'buy');
   if (existing) {
     existing.qty += 1;
+    existing.shippingFee = unitShippingFee;
   } else {
     state.cart.push({
       cartItemId: 'CI-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
@@ -1959,6 +2005,7 @@ function addToCartBuy(productId) {
       image: product.image,
       mode: 'buy',
       price: Number(product.price || 0),
+      shippingFee: unitShippingFee,
       qty: 1
     });
   }
@@ -1973,6 +2020,7 @@ function addToCartRent(productId, rentDays, rentStartDate, qty) {
   if (!product) return;
 
   const rentEndDate = addDaysToDateStr(rentStartDate, rentDays);
+  const unitShippingFee = getProductShippingFee(product);
   state.cart.push({
     cartItemId: 'CI-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
     productId: product.id,
@@ -1983,6 +2031,7 @@ function addToCartRent(productId, rentDays, rentStartDate, qty) {
     rentDays: Number(rentDays),
     rentRate: Number(product.rentPricePerDay || 0),
     deposit: Number(product.rentDeposit || 0),
+    shippingFee: unitShippingFee,
     rentStartDate,
     rentEndDate,
     qty: Number(qty || 1)
@@ -2004,17 +2053,21 @@ function calculateCartTotals() {
   let buySubtotal = 0;
   let rentSubtotal = 0;
   let depositSubtotal = 0;
+  let shippingFee = 0;
 
   state.cart.forEach((item) => {
+    const qty = Number(item.qty || 1);
+    const unitShip = getCartItemShippingFeePerUnit(item);
+    item.shippingFee = unitShip;
     if (item.mode === 'rent') {
-      rentSubtotal += Number(item.rentRate) * Number(item.rentDays) * Number(item.qty);
-      depositSubtotal += Number(item.deposit) * Number(item.qty);
+      rentSubtotal += Number(item.rentRate) * Number(item.rentDays) * qty;
+      depositSubtotal += Number(item.deposit) * qty;
     } else {
-      buySubtotal += Number(item.price) * Number(item.qty);
+      buySubtotal += Number(item.price) * qty;
     }
+    shippingFee += unitShip * qty;
   });
 
-  const shippingFee = state.cart.length > 0 ? Number(state.settings.shippingFee ?? 60) : 0;
   const grandTotal = buySubtotal + rentSubtotal + depositSubtotal + shippingFee;
 
   return { buySubtotal, rentSubtotal, depositSubtotal, shippingFee, grandTotal };
@@ -2045,6 +2098,12 @@ function renderCartModalContents() {
   filledState.hidden = false;
 
   container.innerHTML = state.cart.map((item) => {
+    const unitShip = getCartItemShippingFeePerUnit(item);
+    const lineShip = unitShip * Number(item.qty || 1);
+    const shipText = lineShip === 0
+      ? '<span style="color:#34d399; font-weight:700;">ส่งฟรี! (฿0)</span>'
+      : `<strong style="color:#38bdf8;">${formatTHB(lineShip)}</strong> (${formatTHB(unitShip)}/ชิ้น)`;
+
     if (item.mode === 'rent') {
       const rentCost = item.rentRate * item.rentDays * item.qty;
       const depCost = item.deposit * item.qty;
@@ -2057,6 +2116,7 @@ function renderCartModalContents() {
             <div style="font-size:0.82rem; color:var(--text-secondary);">
               ค่าเช่า: ${formatTHB(item.rentRate)}/วัน × ${item.rentDays} วัน × ${item.qty} แผ่น = <strong>${formatTHB(rentCost)}</strong>
               | ค่ามัดจำแผ่น: <strong style="color:#fcd34d;">${formatTHB(depCost)}</strong>
+              | 🚚 ค่าส่งขาไป: ${shipText}
             </div>
             <div style="font-size:0.78rem; color:#34d399;">
               📅 วันเริ่มเช่า: ${formatThaiDate(item.rentStartDate)} → กำหนดส่งคืน: ${formatThaiDate(item.rentEndDate)} (🚚 ทางร้านจ่ายเงินค่าส่งของกลับให้)
@@ -2079,7 +2139,7 @@ function renderCartModalContents() {
             <span class="badge badge-cyan">🛒 ซื้อขาด</span>
             <h4 style="margin:0.25rem 0 0.15rem;">${escapeXml(item.name)} (${escapeXml(item.platform)})</h4>
             <div style="font-size:0.84rem; color:var(--text-secondary);">
-              ราคา ${formatTHB(item.price)} × ${item.qty} ชิ้น
+              ราคา ${formatTHB(item.price)} × ${item.qty} ชิ้น | 🚚 ค่าส่ง: ${shipText}
             </div>
           </div>
           <div style="text-align:end;">
@@ -2107,7 +2167,7 @@ function renderCartModalContents() {
   document.getElementById('cart-buy-subtotal').textContent = formatTHB(totals.buySubtotal);
   document.getElementById('cart-rent-subtotal').textContent = formatTHB(totals.rentSubtotal);
   document.getElementById('cart-deposit-subtotal').textContent = formatTHB(totals.depositSubtotal);
-  document.getElementById('cart-shipping-fee').textContent = formatTHB(totals.shippingFee);
+  document.getElementById('cart-shipping-fee').textContent = totals.shippingFee === 0 ? 'ส่งฟรี! (฿0)' : formatTHB(totals.shippingFee);
   document.getElementById('cart-grand-total').textContent = formatTHB(totals.grandTotal);
 
   // Payment QR & Bank details (using owner's actual MAKE by KBank QR image)
@@ -2223,7 +2283,7 @@ function renderAdminOrdersTable() {
           <div style="font-weight:800; font-size:1rem; color:#34d399;">สุทธิ: ${formatTHB(o.grandTotal)}</div>
           <div style="font-size:0.76rem; color:var(--text-muted);">
             ซื้อ: ${formatTHB(o.buySubtotal)} | เช่า: ${formatTHB(o.rentSubtotal)}<br>
-            มัดจำแผ่น: <strong style="color:#fcd34d;">${formatTHB(o.depositSubtotal)}</strong>
+            มัดจำแผ่น: <strong style="color:#fcd34d;">${formatTHB(o.depositSubtotal)}</strong> | ค่าส่ง: <strong style="color:#38bdf8;">${formatTHB(o.shippingFee || 0)}</strong>
           </div>
         </td>
         <td>${slipBtnHtml}</td>
@@ -2370,7 +2430,12 @@ function renderAdminProductsTable() {
           ${getCategoryLabel(p.category)}<br>
           <span class="platform-pill platform-${escapeXml(p.platform)}" style="display:inline-block; margin-top:4px;">${escapeXml(p.platform)}</span>
         </td>
-        <td><strong style="color:var(--accent-cyan);">${Number(p.price) > 0 ? formatTHB(p.price) : '-'}</strong></td>
+        <td>
+          <strong style="color:var(--accent-cyan);">${Number(p.price) > 0 ? formatTHB(p.price) : '-'}</strong><br>
+          <span style="font-size:0.76rem; color:${getProductShippingFee(p) === 0 ? '#34d399' : '#38bdf8'};">
+            🚚 ค่าส่ง: ${getProductShippingFee(p) === 0 ? 'ส่งฟรี' : `${formatTHB(getProductShippingFee(p))}/ชิ้น`}
+          </span>
+        </td>
         <td>${rentInfo}</td>
         <td><strong>${p.stock}</strong> ชิ้น</td>
         <td>${statusText}</td>
@@ -2487,6 +2552,12 @@ function openProductFormModal(productId = null) {
   document.getElementById('prod-status').value = prod ? prod.status : 'ready';
   document.getElementById('prod-price').value = prod ? prod.price : 1890;
   document.getElementById('prod-stock').value = prod ? prod.stock : 5;
+  const shipVal = prod ? getProductShippingFee(prod) : 50;
+  const shipInput = document.getElementById('prod-shipping-fee');
+  if (shipInput) shipInput.value = shipVal;
+  document.querySelectorAll('#prod-shipping-presets .preset-chip').forEach((chip) => {
+    chip.classList.toggle('active', Number(chip.getAttribute('data-ship-preset')) === Number(shipVal));
+  });
   document.getElementById('prod-can-rent').checked = prod ? Boolean(prod.canRent) : true;
   document.getElementById('prod-rent-rate').value = prod ? (prod.rentPricePerDay || 45) : 45;
   document.getElementById('prod-rent-deposit').value = prod ? (prod.rentDeposit || 500) : 500;
@@ -2934,6 +3005,38 @@ document.addEventListener('DOMContentLoaded', () => {
   // Admin Add/Edit Product
   document.getElementById('btn-add-product-modal')?.addEventListener('click', () => openProductFormModal(null));
 
+  document.querySelectorAll('#prod-shipping-presets .preset-chip').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      const val = Number(chip.getAttribute('data-ship-preset') || 0);
+      const shipInput = document.getElementById('prod-shipping-fee');
+      if (shipInput) shipInput.value = val;
+      document.querySelectorAll('#prod-shipping-presets .preset-chip').forEach((c) => {
+        c.classList.toggle('active', c === chip);
+      });
+    });
+  });
+
+  document.getElementById('prod-shipping-fee')?.addEventListener('input', (e) => {
+    const val = Number(e.target.value);
+    document.querySelectorAll('#prod-shipping-presets .preset-chip').forEach((c) => {
+      c.classList.toggle('active', Number(c.getAttribute('data-ship-preset')) === val);
+    });
+  });
+
+  document.getElementById('prod-category')?.addEventListener('change', (e) => {
+    const isNew = !document.getElementById('prod-id')?.value;
+    if (!isNew) return;
+    const cat = e.target.value;
+    const suggestedShip = cat === 'console' ? 150 : (cat === 'disc' ? 50 : 80);
+    const shipInput = document.getElementById('prod-shipping-fee');
+    if (shipInput) {
+      shipInput.value = suggestedShip;
+      document.querySelectorAll('#prod-shipping-presets .preset-chip').forEach((c) => {
+        c.classList.toggle('active', Number(c.getAttribute('data-ship-preset')) === suggestedShip);
+      });
+    }
+  });
+
   document.getElementById('prod-can-rent')?.addEventListener('change', (e) => {
     document.getElementById('prod-rent-fields').style.opacity = e.target.checked ? '1' : '0.45';
   });
@@ -3033,6 +3136,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const status = document.getElementById('prod-status').value;
     const price = Number(document.getElementById('prod-price').value || 0);
     const stock = Number(document.getElementById('prod-stock').value || 0);
+    const shippingFee = Math.max(0, Number(document.getElementById('prod-shipping-fee')?.value ?? 50));
     const canRent = document.getElementById('prod-can-rent').checked;
     const rentPricePerDay = canRent ? Number(document.getElementById('prod-rent-rate').value || 0) : 0;
     const rentDeposit = canRent ? Number(document.getElementById('prod-rent-deposit').value || 0) : 0;
@@ -3064,6 +3168,7 @@ document.addEventListener('DOMContentLoaded', () => {
       status,
       price,
       stock,
+      shippingFee,
       canRent,
       rentPricePerDay,
       rentDeposit,
@@ -3413,6 +3518,15 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('admin-support-filter-status')?.addEventListener('change', renderAdminSupportTicketsTable);
   document.getElementById('btn-export-support-csv')?.addEventListener('click', exportSupportTicketsToCsv);
   document.getElementById('btn-sync-support-sheet')?.addEventListener('click', syncAllSupportTicketsToGoogleSheet);
+
+  // Collapsible Hero / Store Intro Footer Button
+  document.getElementById('btn-collapse-hero-intro')?.addEventListener('click', () => {
+    const heroDisclosure = document.getElementById('hero-intro-disclosure');
+    if (heroDisclosure) {
+      heroDisclosure.removeAttribute('open');
+      heroDisclosure.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  });
 });
 
 function refreshOpenOrderLookupModal() {
@@ -3580,7 +3694,7 @@ function renderOrderLookupList(orders, isNewOrder = false, sentToSheet = false, 
           ${itemsList}
         </ul>
         <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; font-size:0.9rem; padding-block-start:0.5rem; border-block-start:1px solid var(--border-subtle);">
-          <span>รวมมัดจำแผ่น: <strong style="color:#fcd34d;">${formatTHB(o.depositSubtotal)}</strong></span>
+          <span>รวมมัดจำแผ่น: <strong style="color:#fcd34d;">${formatTHB(o.depositSubtotal)}</strong> • ค่าจัดส่ง: <strong style="color:#38bdf8;">${Number(o.shippingFee || 0) === 0 ? 'ส่งฟรี' : formatTHB(o.shippingFee)}</strong></span>
           <strong style="color:${isDeleted ? '#fda4af' : '#34d399'}; font-size:1.05rem;">ยอดสุทธิ: ${formatTHB(o.grandTotal)}</strong>
         </div>
         ${footerActionsHtml}
@@ -3689,12 +3803,16 @@ function buildOrderContractHtml(order, options = { unmasked: true, isDraft: fals
       ? `<strong>${formatTHB(Number(item.deposit || 0) * Number(item.qty || 1))}</strong><br><span style="font-size:0.74rem; color:#059669;">(ได้รับคืน 100%)</span>`
       : `-`;
 
+    const unitShip = getCartItemShippingFeePerUnit(item, true);
+    const lineShip = unitShip * Number(item.qty || 1);
+    const shipBadge = lineShip === 0 ? 'ส่งฟรี' : formatTHB(lineShip);
+
     return `
       <tr>
         <td style="text-align:center;">${idx + 1}</td>
         <td>
           <strong>${escapeXml(item.name)}</strong><br>
-          <span style="font-size:0.76rem; color:#475569;">แพลตฟอร์ม: ${escapeXml(item.platform || '-')}</span>
+          <span style="font-size:0.76rem; color:#475569;">แพลตฟอร์ม: ${escapeXml(item.platform || '-')} • 🚚 ค่าส่ง: ${escapeXml(shipBadge)}</span>
         </td>
         <td>${typeText}</td>
         <td style="text-align:center;">${Number(item.qty || 1)}</td>
@@ -3791,7 +3909,7 @@ function buildOrderContractHtml(order, options = { unmasked: true, isDraft: fals
           รวมค่าซื้อสินค้าขาด: <strong>${formatTHB(order?.buySubtotal || 0)}</strong> |
           รวมค่าเช่าแผ่นเกม: <strong>${formatTHB(order?.rentSubtotal || 0)}</strong> |
           รวมเงินมัดจำแผ่น (ได้รับคืน 100%): <strong style="color:#0284c7;">${formatTHB(order?.depositSubtotal || 0)}</strong> |
-          ค่าจัดส่งด่วน: <strong>${formatTHB(order?.shippingFee ?? 60)}</strong>
+          ค่าจัดส่งรวมตามรายการสินค้า: <strong>${Number(order?.shippingFee ?? 0) === 0 ? 'ส่งฟรี (฿0)' : formatTHB(order?.shippingFee ?? 0)}</strong>
         </div>
         <div style="font-size:0.98rem; font-weight:800; color:#059669;">
           รวมยอดชำระสุทธิทั้งสิ้น: ${formatTHB(order?.grandTotal || 0)}
@@ -3836,10 +3954,13 @@ function buildOrderContractPlainText(order, unmasked = true) {
   const custAddress = unmasked ? (order?.customer?.address || '-') : 'ปกปิดตาม PDPA';
 
   const itemLines = (order?.items || []).map((item, idx) => {
+    const unitShip = getCartItemShippingFeePerUnit(item, true);
+    const lineShip = unitShip * Number(item.qty || 1);
+    const shipStr = lineShip === 0 ? 'ส่งฟรี' : formatTHB(lineShip);
     if (item.mode === 'rent') {
-      return `${idx + 1}. [เช่าแผ่น ${item.rentDays} วัน] ${item.name} (${item.platform}) x${item.qty} | ค่าเช่า ${formatTHB(item.rentRate * item.rentDays * item.qty)} + มัดจำแผ่น ${formatTHB(item.deposit * item.qty)} | เริ่มเช่า: ${formatThaiDate(item.rentStartDate)} -> กำหนดส่งคืน: ${formatThaiDate(item.rentEndDate)}`;
+      return `${idx + 1}. [เช่าแผ่น ${item.rentDays} วัน] ${item.name} (${item.platform}) x${item.qty} | ค่าเช่า ${formatTHB(item.rentRate * item.rentDays * item.qty)} + มัดจำแผ่น ${formatTHB(item.deposit * item.qty)} + ค่าส่ง ${shipStr} | เริ่มเช่า: ${formatThaiDate(item.rentStartDate)} -> กำหนดส่งคืน: ${formatThaiDate(item.rentEndDate)}`;
     }
-    return `${idx + 1}. [ซื้อขาด] ${item.name} (${item.platform}) x${item.qty} | ราคา ${formatTHB(item.price * item.qty)}`;
+    return `${idx + 1}. [ซื้อขาด] ${item.name} (${item.platform}) x${item.qty} | ราคา ${formatTHB(item.price * item.qty)} + ค่าส่ง ${shipStr}`;
   }).join('\n');
 
   return [
@@ -3858,7 +3979,7 @@ function buildOrderContractPlainText(order, unmasked = true) {
     `รวมค่าซื้อสินค้า: ${formatTHB(order?.buySubtotal || 0)}`,
     `รวมค่าเช่าแผ่นเกม: ${formatTHB(order?.rentSubtotal || 0)}`,
     `รวมเงินมัดจำแผ่นเกม (ได้รับคืน 100% เมื่อคืนแผ่นปกติ): ${formatTHB(order?.depositSubtotal || 0)}`,
-    `ค่าจัดส่งด่วน: ${formatTHB(order?.shippingFee ?? 60)}`,
+    `ค่าจัดส่งรวมตามรายการสินค้า: ${formatTHB(order?.shippingFee ?? 0)}`,
     `รวมยอดชำระสุทธิทั้งสิ้น: ${formatTHB(order?.grandTotal || 0)}`,
     `------------------------------------------------`,
     `เงื่อนไขสำคัญ: ทางร้านออกค่าส่งแผ่นขากลับให้ฟรี และโอนคืนเงินมัดจำเต็มจำนวน 100% ภายใน 24 ชม. หลังได้รับแผ่นคืนในสภาพปกติ`,

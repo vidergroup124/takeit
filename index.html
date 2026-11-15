@@ -26,7 +26,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Prompt:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20261113-delorder1">
+  <link rel="stylesheet" href="styles.css?v=20261115-mobile1">
   <style>
     /* Force override any cached mobile CSS so modal dialogs never collapse on iOS / Instagram browser */
     dialog[open] {
@@ -259,7 +259,8 @@
                 <input type="file" id="setting-qr-file" accept="image/*,.heic,.heif,image/heic,image/heif">
               </div>
               <div class="field">
-                <label for="setting-shipping-fee">ค่าจัดส่งมาตรฐานต่อออเดอร์ (บาท)</label>
+                <label for="setting-shipping-fee">ค่าจัดส่งเริ่มต้น (ใช้เฉพาะกรณีสินค้าไม่ได้ระบุค่าส่งแยกชิ้น) (บาท)</label>
+                <span class="hint">คุณสามารถตั้งค่าส่งแยกตามสินค้าแต่ละชิ้นได้โดยตรงในหน้า เพิ่ม/แก้ไขสินค้า</span>
                 <input type="number" id="setting-shipping-fee" name="shippingFee" min="0" step="1">
               </div>
             </div>
@@ -355,57 +356,81 @@
       </div>
     </section>
 
-    <!-- Hero Section -->
-    <section class="hero" aria-label="แนะนำร้าน TakeIT">
-      <div>
-        <div class="hero-badges">
-          <span class="badge badge-cyan">⚡ TAKEIT GAMER STORE</span>
-          <span class="badge badge-purple">💿 บริการเช่าแผ่นเกมรายวัน + มัดจำแผ่น</span>
-          <span class="badge badge-emerald">🚚 เช่าแผ่นเกม: ทางร้านจ่ายค่าส่งของกลับให้!</span>
-        </div>
-        <h1>ศูนย์รวมเครื่องเกมคอนโซล &amp; แผ่นเกมแท้ สำหรับเกมเมอร์ตัวจริง</h1>
-        <p>
-          <strong>TakeIT</strong> คัดสรรเครื่องเกมคอนโซลรุ่นฮิต (PS5, Nintendo Switch, Xbox, Handheld) และแผ่นเกมคอนโซลแท้ครบทุกแนว
-          พร้อมทางเลือกสุดคุ้ม <strong>"ซื้อขาด"</strong> หรือ <strong>"เช่าแผ่นเกมรายวัน"</strong> เลือกจำนวนวันเองได้ (<strong>พิเศษ! เวลาส่งแผ่นคืน ทางร้านจ่ายค่าส่งของกลับให้</strong>) ส่วนอุปกรณ์เกมมิ่งเกียร์และสินค้า IT อื่นๆ กำลังทยอยอัปเดตเร็วๆ นี้
-        </p>
+    <!-- Hero Section (Collapsed by default to keep mobile view clean & uncluttered) -->
+    <section class="hero-section-wrap" aria-label="แนะนำร้าน TakeIT">
+      <details id="hero-intro-disclosure" class="hero-disclosure">
+        <summary class="hero-disclosure-summary">
+          <span class="hero-summary-left">
+            <span class="badge badge-cyan hero-summary-badge">⚡ TAKEIT</span>
+            <span class="hero-summary-text">
+              <strong>เกี่ยวกับร้าน &amp; วิธีเช่าแผ่นเกมรายวัน</strong>
+              <span class="hero-summary-subtext">ซื้อขาด / เช่าแผ่นรายวัน (ส่งแผ่นคืนร้านออกค่าส่งให้ฟรี!)</span>
+            </span>
+          </span>
+          <span class="hero-summary-action" aria-hidden="true">
+            <span class="summary-closed-text">กดดูข้อมูลร้าน</span>
+            <span class="summary-open-text">ย่อเก็บ</span>
+          </span>
+        </summary>
 
-        <div class="hero-highlights">
-          <div class="highlight-box">
-            <strong>🎮 เครื่องเกมคอนโซลแท้ศูนย์</strong>
-            <span>PS5 Pro / Slim, Nintendo Switch OLED, Xbox Series X, Handheld PC</span>
+        <div class="hero">
+          <div>
+            <div class="hero-badges">
+              <span class="badge badge-cyan">⚡ TAKEIT GAMER STORE</span>
+              <span class="badge badge-purple">💿 บริการเช่าแผ่นเกมรายวัน + มัดจำแผ่น</span>
+              <span class="badge badge-emerald">🚚 เช่าแผ่นเกม: ทางร้านจ่ายค่าส่งของกลับให้!</span>
+            </div>
+            <h1>ศูนย์รวมเครื่องเกมคอนโซล &amp; แผ่นเกมแท้ สำหรับเกมเมอร์ตัวจริง</h1>
+            <p>
+              <strong>TakeIT</strong> คัดสรรเครื่องเกมคอนโซลรุ่นฮิต (PS5, Nintendo Switch, Xbox, Handheld) และแผ่นเกมคอนโซลแท้ครบทุกแนว
+              พร้อมทางเลือกสุดคุ้ม <strong>"ซื้อขาด"</strong> หรือ <strong>"เช่าแผ่นเกมรายวัน"</strong> เลือกจำนวนวันเองได้ (<strong>พิเศษ! เวลาส่งแผ่นคืน ทางร้านจ่ายค่าส่งของกลับให้</strong>) ส่วนอุปกรณ์เกมมิ่งเกียร์และสินค้า IT อื่นๆ กำลังทยอยอัปเดตเร็วๆ นี้
+            </p>
+
+            <div class="hero-highlights">
+              <div class="highlight-box">
+                <strong>🎮 เครื่องเกมคอนโซลแท้ศูนย์</strong>
+                <span>PS5 Pro / Slim, Nintendo Switch OLED, Xbox Series X, Handheld PC</span>
+              </div>
+              <div class="highlight-box">
+                <strong>💿 ซื้อขาด หรือ เช่าแผ่นรายวัน</strong>
+                <span>เลือกวันเช่าเองได้ คิด (ราคาเช่า/วัน × วัน) + มัดจำแผ่น และทางร้านจ่ายค่าส่งแผ่นกลับให้!</span>
+              </div>
+              <div class="highlight-box">
+                <strong>🖥️ สินค้า IT &amp; เกมมิ่งเกียร์</strong>
+                <span>เตรียมพบกับจอมอนิเตอร์ หูฟัง จอยโปร และอุปกรณ์ IT เร็วๆ นี้</span>
+              </div>
+            </div>
           </div>
-          <div class="highlight-box">
-            <strong>💿 ซื้อขาด หรือ เช่าแผ่นรายวัน</strong>
-            <span>เลือกวันเช่าเองได้ คิด (ราคาเช่า/วัน × วัน) + มัดจำแผ่น และทางร้านจ่ายค่าส่งแผ่นกลับให้!</span>
-          </div>
-          <div class="highlight-box">
-            <strong>🖥️ สินค้า IT &amp; เกมมิ่งเกียร์</strong>
-            <span>เตรียมพบกับจอมอนิเตอร์ หูฟัง จอยโปร และอุปกรณ์ IT เร็วๆ นี้</span>
+
+          <aside class="rental-explainer-card" aria-label="ขั้นตอนการเช่าแผ่นเกมกับร้าน TakeIT">
+            <h2>✨ ระบบเช่าแผ่นเกมคอนโซล TakeIT คิดยังไง?</h2>
+            <ol class="rental-steps">
+              <li>
+                <span class="step-num">1</span>
+                <div><strong>เลือกแผ่นเกมที่มีป้าย "เช่าได้"</strong> แล้วกดปุ่ม <em>"เช่าแผ่นรายวัน"</em></div>
+              </li>
+              <li>
+                <span class="step-num">2</span>
+                <div><strong>ระบุจำนวนวันที่ต้องการเช่า</strong> ระบบคำนวณ <code>(ราคาเช่า/วัน × จำนวนวัน) + ค่ามัดจำแผ่น</code> ให้อัตโนมัติ</div>
+              </li>
+              <li>
+                <span class="step-num">3</span>
+                <div><strong>กรอกที่อยู่จัดส่ง &amp; แนบสลิปโอนเงิน</strong> แบบ Guest ไม่ต้องสมัครสมาชิก</div>
+              </li>
+              <li>
+                <span class="step-num">4</span>
+                <div><strong>รับเงินค่ามัดจำแผ่นคืนเต็มจำนวน 100% + ทางร้านจ่ายเงินค่าส่งของกลับให้!</strong> เมื่อส่งคืนแผ่นเกมตามกำหนดในสภาพปกติ</div>
+              </li>
+            </ol>
+          </aside>
+
+          <div class="hero-collapse-footer">
+            <button type="button" class="btn btn-outline btn-sm" id="btn-collapse-hero-intro">
+              ▲ ย่อเก็บข้อมูลแนะนำร้าน
+            </button>
           </div>
         </div>
-      </div>
-
-      <aside class="rental-explainer-card" aria-label="ขั้นตอนการเช่าแผ่นเกมกับร้าน TakeIT">
-        <h2>✨ ระบบเช่าแผ่นเกมคอนโซล TakeIT คิดยังไง?</h2>
-        <ol class="rental-steps">
-          <li>
-            <span class="step-num">1</span>
-            <div><strong>เลือกแผ่นเกมที่มีป้าย "เช่าได้"</strong> แล้วกดปุ่ม <em>"เช่าแผ่นรายวัน"</em></div>
-          </li>
-          <li>
-            <span class="step-num">2</span>
-            <div><strong>ระบุจำนวนวันที่ต้องการเช่า</strong> ระบบคำนวณ <code>(ราคาเช่า/วัน × จำนวนวัน) + ค่ามัดจำแผ่น</code> ให้อัตโนมัติ</div>
-          </li>
-          <li>
-            <span class="step-num">3</span>
-            <div><strong>กรอกที่อยู่จัดส่ง &amp; แนบสลิปโอนเงิน</strong> แบบ Guest ไม่ต้องสมัครสมาชิก</div>
-          </li>
-          <li>
-            <span class="step-num">4</span>
-            <div><strong>รับเงินค่ามัดจำแผ่นคืนเต็มจำนวน 100% + ทางร้านจ่ายเงินค่าส่งของกลับให้!</strong> เมื่อส่งคืนแผ่นเกมตามกำหนดในสภาพปกติ</div>
-          </li>
-        </ol>
-      </aside>
+      </details>
     </section>
 
     <!-- Filter & Search Bar -->
@@ -425,7 +450,15 @@
         </button>
       </div>
 
-      <div class="filter-controls">
+      <search class="filter-controls">
+        <input
+          type="search"
+          id="search-input"
+          placeholder="🔍 ค้นหาชื่อเครื่องเกม, แผ่นเกม..."
+          enterkeyhint="search"
+          aria-label="ค้นหาสินค้า"
+        >
+
         <select id="filter-platform" aria-label="กรองตามแพลตฟอร์ม">
           <option value="all">ทุกแพลตฟอร์ม</option>
           <option value="PS5">PlayStation 5 (PS5)</option>
@@ -442,15 +475,7 @@
           <option value="ready">✅ เฉพาะสินค้าพร้อมส่งทันที</option>
           <option value="coming_soon">⏳ สินค้าเตรียมเข้าใหม่ (Coming Soon)</option>
         </select>
-
-        <input
-          type="search"
-          id="search-input"
-          placeholder="ค้นหาชื่อเครื่องเกม, แผ่นเกม..."
-          enterkeyhint="search"
-          aria-label="ค้นหาสินค้า"
-        >
-      </div>
+      </search>
     </section>
 
     <!-- Product Catalog Grid -->
@@ -564,6 +589,10 @@
             <strong id="calc-deposit-display" style="color:#fcd34d;">฿0</strong>
           </div>
           <div class="calc-line">
+            <span>ค่าจัดส่งสินค้าชิ้นนี้ (ขาไป):</span>
+            <strong id="calc-shipping-display" style="color:#38bdf8;">฿0</strong>
+          </div>
+          <div class="calc-line">
             <span>กำหนดวันส่งคืนแผ่น:</span>
             <strong id="calc-return-date-display" style="color:#34d399;">-</strong>
           </div>
@@ -572,7 +601,7 @@
             <strong style="color:#34d399;">🚚 ทางร้านจ่ายเงินค่าส่งของกลับให้ฟรี!</strong>
           </div>
           <div class="calc-line calc-total">
-            <span>ยอดรวมรายการเช่านี้ (ค่าเช่า + มัดจำ):</span>
+            <span>ยอดรวมรายการเช่านี้ (ค่าเช่า + มัดจำ + ค่าส่ง):</span>
             <span id="calc-total-display">฿0</span>
           </div>
         </div>
@@ -621,7 +650,7 @@
             <strong id="cart-deposit-subtotal" style="color:#fcd34d;">฿0</strong>
           </div>
           <div class="calc-line">
-            <span>ค่าจัดส่งขาไป (EMS / Flash):</span>
+            <span>ค่าจัดส่งรวมตามรายการสินค้า (EMS / Flash):</span>
             <strong id="cart-shipping-fee">฿0</strong>
           </div>
           <div class="calc-line">
@@ -901,6 +930,23 @@
         <div class="field">
           <label for="prod-stock">จำนวนสต็อกคงเหลือ (ชิ้น/แผ่น) *</label>
           <input type="number" id="prod-stock" min="0" step="1" value="5" required>
+        </div>
+      </div>
+
+      <!-- Per-Product Shipping Fee Config Box -->
+      <div class="highlight-box" style="margin-block-end:1.1rem; padding:0.9rem 1rem; border-color:rgba(56,189,248,0.35); background:rgba(56,189,248,0.06);">
+        <div class="field" style="margin-block-end:0;">
+          <label for="prod-shipping-fee" style="color:var(--accent-cyan); font-weight:700;">🚚 ค่าจัดส่งสินค้าชิ้นนี้ (บาท / ชิ้น) *</label>
+          <span id="prod-ship-hint" class="hint">ตั้งค่าส่งแยกตามขนาดและน้ำหนักของสินค้าชิ้นนี้ได้โดยตรง (ใส่ 0 หากต้องการจัดส่งฟรี)</span>
+          <div id="prod-shipping-presets" style="display:flex; flex-wrap:wrap; gap:0.4rem; margin-block:0.45rem 0.65rem;">
+            <button type="button" class="preset-chip" data-ship-preset="0">ส่งฟรี (฿0)</button>
+            <button type="button" class="preset-chip" data-ship-preset="50">แผ่นเกม (฿50)</button>
+            <button type="button" class="preset-chip" data-ship-preset="60">มาตรฐาน (฿60)</button>
+            <button type="button" class="preset-chip" data-ship-preset="80">จอย/อุปกรณ์ (฿80)</button>
+            <button type="button" class="preset-chip" data-ship-preset="150">เครื่องคอนโซล (฿150)</button>
+            <button type="button" class="preset-chip" data-ship-preset="250">ชิ้นใหญ่พิเศษ (฿250)</button>
+          </div>
+          <input type="number" id="prod-shipping-fee" min="0" step="1" value="50" required aria-describedby="prod-ship-hint">
         </div>
       </div>
 
@@ -1301,7 +1347,7 @@
 
   <!-- HEIC/HEIF image decoder for Apple iPhone photos in Chrome & other browsers -->
   <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js" defer></script>
-  <script src="app.js?v=20261114-support1" defer></script>
+  <script src="app.js?v=20261115-mobile1" defer></script>
 </body>
 </html>
 
