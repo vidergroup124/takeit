@@ -26,7 +26,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Prompt:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=20261115-mobile1">
+  <link rel="stylesheet" href="styles.css?v=20261116-esp32-2">
   <style>
     /* Force override any cached mobile CSS so modal dialogs never collapse on iOS / Instagram browser */
     dialog[open] {
@@ -72,6 +72,10 @@
             เข้าสู่ระบบด้วย Gmail
           </button>
         </div>
+
+        <button type="button" class="btn btn-emerald btn-sm" id="btn-open-home-console" title="สนใจเช่าเครื่องคอนโซลไปติดตั้งที่บ้าน หรือเช็คชั่วโมงเครื่องตัวเองแบบ Real-time (ESP32)">
+          🏠 เช่าเครื่องติดบ้าน / เช็คชั่วโมง (Real-time)
+        </button>
 
         <button type="button" class="btn btn-outline btn-sm" id="btn-check-order">
           📦 เช็คสถานะคำสั่งซื้อ
@@ -141,7 +145,10 @@
           📋 รายการสั่งซื้อ &amp; เช่าแผ่นเกม
         </button>
         <button type="button" class="tab-btn" data-admin-tab="products">
-          🎮 จัดการสินค้า &amp; ราคาเช่า/มัดจำ
+          🎮 จัดการสินค้า &amp; ราคาเช่า/ติดตั้ง
+        </button>
+        <button type="button" class="tab-btn" data-admin-tab="esp32" id="btn-admin-tab-esp32">
+          📡 เครื่องเช่าติดบ้าน &amp; บอร์ด ESP32 (Real-time) <span class="badge badge-emerald" id="admin-esp32-badge" style="display:none; font-size:0.7rem; padding:0.12rem 0.45rem; margin-inline-start:0.3rem;">0</span>
         </button>
         <button type="button" class="tab-btn" data-admin-tab="support" id="btn-admin-tab-support">
           💬 แจ้งปัญหา &amp; คำขอสินค้า <span class="badge badge-amber" id="admin-support-badge" style="display:none; font-size:0.7rem; padding:0.12rem 0.45rem; margin-inline-start:0.3rem;">0</span>
@@ -305,7 +312,7 @@
                 </div>
               </div>
 
-              <div style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-block-top:0.75rem;">
+              <div style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-block-start:0.75rem;">
                 <button type="submit" class="btn btn-primary">
                   💾 บันทึกการตั้งค่าทั้งหมด
                 </button>
@@ -354,6 +361,32 @@
 
         <div id="admin-support-tickets-list" style="display:flex; flex-direction:column; gap:0.85rem;"></div>
       </div>
+
+      <!-- Admin Tab 5: Home Console Installation & ESP32 Real-time Sessions -->
+      <div id="admin-tab-esp32" class="admin-tab-content" hidden>
+        <div class="highlight-box" style="margin-block-end:1rem; padding:1rem 1.15rem; border-color:rgba(16,185,129,0.45); background:rgba(16,185,129,0.08);">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:0.75rem;">
+            <div>
+              <h3 style="margin:0 0 0.25rem; font-size:1.02rem; color:#34d399;">
+                📡 ระบบจัดการเครื่องคอนโซลเช่าติดตั้งที่บ้าน &amp; บอร์ด ESP32 Real-time (Postpaid Hourly Meter)
+              </h3>
+              <p style="margin:0; font-size:0.84rem; color:var(--text-secondary);">
+                เมื่อลูกค้าจองติดตั้งเครื่องที่บ้าน หรือแอดมินผูกบอร์ด ESP32 เข้ากับเครื่องของลูกค้า ระบบจะซิงค์เวลาเปิดเครื่องแบบเรียลไทม์ผ่านคอลเลกชัน <code>takeit_console_sessions</code> / Firebase Realtime DB (<code>esp32_devices/&lt;deviceId&gt;</code>) และคำนวณยอดค่ารายชั่วโมงตามจริง (Postpaid) ให้อัตโนมัติ
+              </p>
+            </div>
+            <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+              <button type="button" class="btn btn-emerald btn-sm" id="btn-admin-add-esp32-session">
+                ➕ เปิดบิลเครื่องติดตั้งที่บ้าน / ผูกบอร์ด ESP32 ใหม่
+              </button>
+              <button type="button" class="btn btn-outline btn-sm" id="btn-open-esp32-customer-view">
+                👁️ เปิดหน้าเช็คชั่วโมงของลูกค้า
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div id="admin-esp32-sessions-list" style="display:grid; gap:0.85rem;"></div>
+      </div>
     </section>
 
     <!-- Hero Section (Collapsed by default to keep mobile view clean & uncluttered) -->
@@ -363,8 +396,8 @@
           <span class="hero-summary-left">
             <span class="badge badge-cyan hero-summary-badge">⚡ TAKEIT</span>
             <span class="hero-summary-text">
-              <strong>เกี่ยวกับร้าน &amp; วิธีเช่าแผ่นเกมรายวัน</strong>
-              <span class="hero-summary-subtext">ซื้อขาด / เช่าแผ่นรายวัน (ส่งแผ่นคืนร้านออกค่าส่งให้ฟรี!)</span>
+              <strong>เกี่ยวกับร้าน • เช่าแผ่นรายวัน &amp; เช่าเครื่องติดบ้าน (รายชั่วโมง)</strong>
+              <span class="hero-summary-subtext">ซื้อขาด / เช่าแผ่นส่งคืนฟรี / เช่าคอนโซลติดตั้งที่บ้านเช็คเวลา Real-time</span>
             </span>
           </span>
           <span class="hero-summary-action" aria-hidden="true">
@@ -377,45 +410,45 @@
           <div>
             <div class="hero-badges">
               <span class="badge badge-cyan">⚡ TAKEIT GAMER STORE</span>
-              <span class="badge badge-purple">💿 บริการเช่าแผ่นเกมรายวัน + มัดจำแผ่น</span>
-              <span class="badge badge-emerald">🚚 เช่าแผ่นเกม: ทางร้านจ่ายค่าส่งของกลับให้!</span>
+              <span class="badge badge-emerald">🏠 เช่าคอนโซลติดตั้งที่บ้าน + คิดรายชั่วโมง (ESP32 Real-time)</span>
+              <span class="badge badge-purple">💿 เช่าแผ่นเกมรายวัน (ร้านออกค่าส่งแผ่นกลับให้ฟรี!)</span>
             </div>
             <h1>ศูนย์รวมเครื่องเกมคอนโซล &amp; แผ่นเกมแท้ สำหรับเกมเมอร์ตัวจริง</h1>
             <p>
               <strong>TakeIT</strong> คัดสรรเครื่องเกมคอนโซลรุ่นฮิต (PS5, Nintendo Switch, Xbox, Handheld) และแผ่นเกมคอนโซลแท้ครบทุกแนว
-              พร้อมทางเลือกสุดคุ้ม <strong>"ซื้อขาด"</strong> หรือ <strong>"เช่าแผ่นเกมรายวัน"</strong> เลือกจำนวนวันเองได้ (<strong>พิเศษ! เวลาส่งแผ่นคืน ทางร้านจ่ายค่าส่งของกลับให้</strong>) ส่วนอุปกรณ์เกมมิ่งเกียร์และสินค้า IT อื่นๆ กำลังทยอยอัปเดตเร็วๆ นี้
+              พร้อมบริการใหม่ล่าสุด <strong>"เช่าเครื่องคอนโซลไปติดตั้งที่บ้าน"</strong> จ่ายค่าติดตั้งเริ่มต้น แล้วคิดค่ารายชั่วโมงตามเวลาที่เปิดเล่นจริงผ่านสมาร์ทบอร์ด <strong>ESP32 แบบ Real-time</strong> รวมถึงบริการ <strong>"ซื้อขาด"</strong> และ <strong>"เช่าแผ่นเกมรายวัน"</strong> (<strong>เวลาส่งแผ่นคืน ทางร้านจ่ายค่าส่งของกลับให้ฟรี!</strong>)
             </p>
 
             <div class="hero-highlights">
               <div class="highlight-box">
-                <strong>🎮 เครื่องเกมคอนโซลแท้ศูนย์</strong>
-                <span>PS5 Pro / Slim, Nintendo Switch OLED, Xbox Series X, Handheld PC</span>
+                <strong>🏠 เช่าคอนโซลติดตั้งที่บ้าน (รายชั่วโมง)</strong>
+                <span>จ่ายค่าติดตั้งเริ่มต้น คิดค่ารายชั่วโมงตามจริงเมื่อเปิดเครื่องเล่น เช็คชั่วโมงตัวเองแบบ Real-time ได้ตลอด 24 ชม.</span>
               </div>
               <div class="highlight-box">
                 <strong>💿 ซื้อขาด หรือ เช่าแผ่นรายวัน</strong>
                 <span>เลือกวันเช่าเองได้ คิด (ราคาเช่า/วัน × วัน) + มัดจำแผ่น และทางร้านจ่ายค่าส่งแผ่นกลับให้!</span>
               </div>
               <div class="highlight-box">
-                <strong>🖥️ สินค้า IT &amp; เกมมิ่งเกียร์</strong>
-                <span>เตรียมพบกับจอมอนิเตอร์ หูฟัง จอยโปร และอุปกรณ์ IT เร็วๆ นี้</span>
+                <strong>🎮 เครื่องเกมแท้ &amp; เกมมิ่งเกียร์</strong>
+                <span>PS5 Pro / Slim, Nintendo Switch OLED, Xbox Series X และอุปกรณ์ IT</span>
               </div>
             </div>
           </div>
 
           <aside class="rental-explainer-card" aria-label="ขั้นตอนการเช่าแผ่นเกมกับร้าน TakeIT">
-            <h2>✨ ระบบเช่าแผ่นเกมคอนโซล TakeIT คิดยังไง?</h2>
+            <h2>✨ ระบบเช่าแผ่นเกม &amp; เช่าเครื่องติดบ้าน TakeIT</h2>
             <ol class="rental-steps">
               <li>
                 <span class="step-num">1</span>
-                <div><strong>เลือกแผ่นเกมที่มีป้าย "เช่าได้"</strong> แล้วกดปุ่ม <em>"เช่าแผ่นรายวัน"</em></div>
+                <div><strong>เช่าเครื่องคอนโซลติดตั้งที่บ้าน:</strong> ชำระค่าติดตั้งเครื่องเริ่มต้น ทีมงานนำเครื่องพร้อมบอร์ด <strong>ESP32</strong> ไปติดตั้งให้ถึงบ้าน คิดค่ารายชั่วโมงตามจริงเฉพาะตอนเปิดเล่น (Postpaid)</div>
               </li>
               <li>
                 <span class="step-num">2</span>
-                <div><strong>ระบุจำนวนวันที่ต้องการเช่า</strong> ระบบคำนวณ <code>(ราคาเช่า/วัน × จำนวนวัน) + ค่ามัดจำแผ่น</code> ให้อัตโนมัติ</div>
+                <div><strong>เช็คชั่วโมงเครื่องตัวเองแบบ Real-time:</strong> กดปุ่ม <em>"🏠 เช่าเครื่องติดบ้าน / เช็คชั่วโมง"</em> เพื่อดูเวลาเปิดเครื่องและยอดเงินสะสมแบบวินาทีต่อวินาที</div>
               </li>
               <li>
                 <span class="step-num">3</span>
-                <div><strong>กรอกที่อยู่จัดส่ง &amp; แนบสลิปโอนเงิน</strong> แบบ Guest ไม่ต้องสมัครสมาชิก</div>
+                <div><strong>เช่าแผ่นเกมรายวัน:</strong> ระบบคำนวณ <code>(ราคาเช่า/วัน × จำนวนวัน) + ค่ามัดจำแผ่น</code> ให้อัตโนมัติ</div>
               </li>
               <li>
                 <span class="step-num">4</span>
@@ -438,6 +471,9 @@
       <div class="category-tabs" role="tablist" aria-label="หมวดหมู่สินค้า">
         <button type="button" class="tab-btn active" data-category="all">
           🔥 สินค้าทั้งหมด
+        </button>
+        <button type="button" class="tab-btn" data-category="home_console">
+          🏠 เช่าเครื่องติดบ้าน (รายชั่วโมง Real-time)
         </button>
         <button type="button" class="tab-btn" data-category="console">
           🕹️ เครื่องเกมคอนโซล
@@ -470,7 +506,8 @@
         </select>
 
         <select id="filter-mode" aria-label="กรองตามรูปแบบการซื้อหรือเช่า">
-          <option value="all">ซื้อขาด &amp; เช่าแผ่นทั้งหมด</option>
+          <option value="all">ซื้อขาด &amp; เช่าทั้งหมด</option>
+          <option value="home_install_available">🏠 เฉพาะเครื่องที่รับติดตั้งที่บ้าน (คิดรายชั่วโมง ESP32)</option>
           <option value="rent_available">💿 เฉพาะแผ่นที่มีบริการเช่ารายวัน</option>
           <option value="ready">✅ เฉพาะสินค้าพร้อมส่งทันที</option>
           <option value="coming_soon">⏳ สินค้าเตรียมเข้าใหม่ (Coming Soon)</option>
@@ -512,7 +549,7 @@
       <p style="margin:0 0 0.85rem;">
         จำหน่ายเครื่องเกมคอนโซล • ซื้อ-เช่าแผ่นเกมคอนโซลรายวัน • ชำระเงินปลอดภัย • เชื่อมต่อระบบข้อมูลคำสั่งซื้อเข้าโปรแกรม Sheet อัตโนมัติ
       </p>
-      <div style="display:flex; justify-content:center; gap:0.65rem; flex-wrap:wrap; padding-block-top:0.65rem; border-block-start:1px solid rgba(255,255,255,0.08);">
+      <div style="display:flex; justify-content:center; gap:0.65rem; flex-wrap:wrap; padding-block-start:0.65rem; border-block-start:1px solid rgba(255,255,255,0.08);">
         <button type="button" class="btn btn-outline btn-sm" id="btn-footer-open-support">
           📢 แจ้งปัญหาการใช้งาน / คำสั่งซื้อ
         </button>
@@ -641,6 +678,10 @@
             <span>ยอดรวมสินค้าซื้อขาด:</span>
             <strong id="cart-buy-subtotal">฿0</strong>
           </div>
+          <div class="calc-line" id="cart-home-install-line" hidden>
+            <span>ยอดรวมค่าติดตั้งเครื่องคอนโซลที่บ้าน (ค่ารายชั่วโมงคิดตามจริงผ่าน ESP32 ภายหลัง):</span>
+            <strong id="cart-install-subtotal" style="color:#34d399;">฿0</strong>
+          </div>
           <div class="calc-line">
             <span>ยอดรวมค่าเช่าแผ่นเกม (ตามจำนวนวัน):</span>
             <strong id="cart-rent-subtotal" style="color:#d8b4fe;">฿0</strong>
@@ -650,7 +691,7 @@
             <strong id="cart-deposit-subtotal" style="color:#fcd34d;">฿0</strong>
           </div>
           <div class="calc-line">
-            <span>ค่าจัดส่งรวมตามรายการสินค้า (EMS / Flash):</span>
+            <span>ค่าจัดส่ง (คิดครั้งเดียวตามชิ้นที่ค่าส่งสูงสุด ไม่บวกเพิ่ม):</span>
             <strong id="cart-shipping-fee">฿0</strong>
           </div>
           <div class="calc-line">
@@ -752,7 +793,7 @@
             <div>
               <div style="margin-block-end:0.85rem;">
                 <div style="font-size:0.82rem; color:var(--text-muted);">สแกน QR เพื่อโอนเข้าบัญชีร้าน TakeIT:</div>
-                <strong id="checkout-bank-display" style="font-size:1.05rem; color:var(--accent-cyan); display:block; margin-block-top:0.15rem;">
+                <strong id="checkout-bank-display" style="font-size:1.05rem; color:var(--accent-cyan); display:block; margin-block-start:0.15rem;">
                   MAKE by KBank (ธ.กสิกรไทย) • นาย ภาณุเดช พุทธบัวงาม
                 </strong>
                 <div id="checkout-promptpay-display" style="font-size:0.86rem; color:var(--text-secondary); margin-block-start:0.25rem;">
@@ -779,7 +820,7 @@
           </div>
 
           <!-- Automatic Electronic Rental & Sales Contract Box -->
-          <div class="highlight-box" style="margin-block-top:1rem; padding:0.9rem 1rem; border-color:rgba(56, 189, 248, 0.45); background:rgba(15, 23, 42, 0.78);">
+          <div class="highlight-box" style="margin-block-start:1rem; padding:0.9rem 1rem; border-color:rgba(56, 189, 248, 0.45); background:rgba(15, 23, 42, 0.78);">
             <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.6rem;">
               <div>
                 <div style="font-weight:700; font-size:0.92rem; color:var(--accent-cyan);">
@@ -943,7 +984,7 @@
             <button type="button" class="preset-chip" data-ship-preset="50">แผ่นเกม (฿50)</button>
             <button type="button" class="preset-chip" data-ship-preset="60">มาตรฐาน (฿60)</button>
             <button type="button" class="preset-chip" data-ship-preset="80">จอย/อุปกรณ์ (฿80)</button>
-            <button type="button" class="preset-chip" data-ship-preset="150">เครื่องคอนโซล (฿150)</button>
+            <button type="button" class="preset-chip" data-ship-preset="200">เครื่องคอนโซล (฿200)</button>
             <button type="button" class="preset-chip" data-ship-preset="250">ชิ้นใหญ่พิเศษ (฿250)</button>
           </div>
           <input type="number" id="prod-shipping-fee" min="0" step="1" value="50" required aria-describedby="prod-ship-hint">
@@ -974,6 +1015,51 @@
         </div>
       </div>
 
+      <!-- Home Console Installation + Hourly ESP32 Meter Config Box -->
+      <div class="highlight-box" style="margin-block-end:1.1rem; padding:1rem; border-color:rgba(16,185,129,0.45); background:rgba(16,185,129,0.08);">
+        <div style="display:flex; align-items:center; gap:0.6rem; margin-block-end:0.75rem;">
+          <input type="checkbox" id="prod-can-home-install" style="inline-size:20px; block-size:20px;">
+          <label for="prod-can-home-install" style="margin:0; font-weight:700; color:#34d399; cursor:pointer;">
+            🏠 เปิดบริการ "เช่าเครื่องคอนโซลไปติดตั้งที่บ้าน + คิดรายชั่วโมงตามจริง (บอร์ด ESP32 Real-time)"
+          </label>
+        </div>
+
+        <div id="prod-home-install-fields">
+          <div class="form-grid-2" style="margin-block-end:0.75rem;">
+            <div class="field" style="margin-block-end:0;">
+              <label for="prod-install-fee" style="color:#6ee7b7;">ค่าติดตั้งเครื่องที่บ้านเริ่มต้น (บาท / ครั้ง)</label>
+              <span id="install-fee-hint" class="hint">เรียกเก็บตอนลูกค้าจองคิวนำเครื่องไปติดตั้งที่บ้าน</span>
+              <div id="prod-install-presets" style="display:flex; flex-wrap:wrap; gap:0.35rem; margin-block:0.35rem 0.5rem;">
+                <button type="button" class="preset-chip" data-install-preset="300">฿300</button>
+                <button type="button" class="preset-chip" data-install-preset="400">฿400</button>
+                <button type="button" class="preset-chip" data-install-preset="500">฿500</button>
+                <button type="button" class="preset-chip" data-install-preset="700">฿700</button>
+              </div>
+              <input type="number" id="prod-install-fee" min="0" step="1" value="400" aria-describedby="install-fee-hint">
+            </div>
+
+            <div class="field" style="margin-block-end:0;">
+              <label for="prod-hourly-rate" style="color:#38bdf8;">เรทรายชั่วโมงตามจริง (บาท / ชั่วโมง - Postpaid)</label>
+              <span id="hourly-rate-hint" class="hint">คิดเงินตามชั่วโมงที่บอร์ด ESP32 นับได้จริงเวลาลูกค้าเปิดเครื่อง</span>
+              <div id="prod-hourly-presets" style="display:flex; flex-wrap:wrap; gap:0.35rem; margin-block:0.35rem 0.5rem;">
+                <button type="button" class="preset-chip" data-hourly-preset="20">฿20/ชม.</button>
+                <button type="button" class="preset-chip" data-hourly-preset="25">฿25/ชม.</button>
+                <button type="button" class="preset-chip" data-hourly-preset="30">฿30/ชม.</button>
+                <button type="button" class="preset-chip" data-hourly-preset="35">฿35/ชม.</button>
+                <button type="button" class="preset-chip" data-hourly-preset="45">฿45/ชม.</button>
+              </div>
+              <input type="number" id="prod-hourly-rate" min="0" step="1" value="30" aria-describedby="hourly-rate-hint">
+            </div>
+          </div>
+
+          <div class="field" style="margin-block-end:0;">
+            <label for="prod-esp32-device-id">รหัสบอร์ด ESP32 ประจำเครื่อง (Device ID - ตั้งล่วงหน้าหรือกำหนดตอนติดตั้งได้)</label>
+            <span class="hint">เช่น <code>ESP32-PS5-01</code> หรือ <code>ESP32-NSW-01</code> เพื่อใช้ซิงค์ชั่วโมงใช้งานแบบ Real-time ให้ลูกค้ากดดูได้</span>
+            <input type="text" id="prod-esp32-device-id" placeholder="เช่น ESP32-PS5-01">
+          </div>
+        </div>
+      </div>
+
       <div class="field">
         <label for="prod-desc">รายละเอียดสินค้า / เงื่อนไขเพิ่มเติม</label>
         <textarea id="prod-desc" rows="2" placeholder="ระบุโซนแผ่นเกม ภาษาที่รองรับ อุปกรณ์ในกล่อง หรือเงื่อนไขการเช่า"></textarea>
@@ -991,7 +1077,7 @@
         </div>
         <span class="hint">คุณสามารถอัปโหลดไฟล์รูปจากเครื่องพร้อมกันหลายรูป หรือวางลิงก์รูปภาพเพิ่มได้เรื่อยๆ (รูปที่ 1 จะเป็นรูปปกหลัก)</span>
 
-        <div class="form-grid-2" style="margin-block-top:0.65rem; align-items:end;">
+        <div class="form-grid-2" style="margin-block-start:0.65rem; align-items:end;">
           <div class="field" style="margin-block-end:0;">
             <label for="prod-image-file">1. เลือกรูปจากเครื่อง / มือถือ (JPG, PNG, HEIC iPhone)</label>
             <div style="display:flex; gap:0.45rem; align-items:center;">
@@ -1074,7 +1160,7 @@
 
       <nav aria-label="เลือกรูปภาพสินค้า" class="gallery-thumbs-nav" id="gallery-thumbs-nav"></nav>
 
-      <div id="gallery-product-details" style="margin-block-top:1rem;"></div>
+      <div id="gallery-product-details" style="margin-block-start:1rem;"></div>
     </div>
   </dialog>
 
@@ -1298,7 +1384,7 @@
           <div class="field">
             <label for="issue-image-file">แนบรูปภาพประกอบปัญหา / ภาพหน้าจอ (ไม่บังคับ - รองรับ JPG, PNG, HEIC iPhone)</label>
             <input type="file" id="issue-image-file" accept="image/*,.heic,.heif,image/heic,image/heif">
-            <div id="issue-image-preview-wrap" style="display:none; margin-block-top:0.5rem; align-items:center; gap:0.75rem;">
+            <div id="issue-image-preview-wrap" style="display:none; margin-block-start:0.5rem; align-items:center; gap:0.75rem;">
               <img id="issue-image-preview" src="" alt="รูปภาพประกอบปัญหา" style="max-inline-size:120px; max-block-size:80px; border-radius:6px; border:1px solid var(--border-subtle); object-fit:cover;">
               <button type="button" class="btn btn-outline btn-sm" id="btn-remove-issue-image" style="font-size:0.78rem;">🗑️ ลบรูปนี้</button>
             </div>
@@ -1342,12 +1428,183 @@
     </div>
   </dialog>
 
+  <!-- ========================================================================
+       DIALOG 10: Home Console Installation Service & Real-time ESP32 Meter
+       ======================================================================== -->
+  <dialog id="dialog-home-console" closedby="any" aria-labelledby="home-console-dialog-title" style="max-inline-size: min(880px, 95vw);">
+    <div class="dialog-header">
+      <h2 id="home-console-dialog-title">🏠 บริการเช่าคอนโซลติดตั้งที่บ้าน &amp; เช็คชั่วโมงเครื่อง Real-time (ESP32)</h2>
+      <button type="button" class="btn btn-outline btn-sm" data-close-dialog="dialog-home-console" aria-label="ปิดหน้าต่าง">✕ ปิด</button>
+    </div>
+
+    <div class="dialog-body">
+      <div style="display:flex; gap:0.5rem; margin-block-end:1.1rem; flex-wrap:wrap;">
+        <button type="button" class="tab-btn active" id="btn-tab-home-service" style="flex:1; min-inline-size:210px; justify-content:center;">
+          🏠 สนใจเช่าเครื่องติดตั้งที่บ้าน (ดูราคา &amp; จองคิว)
+        </button>
+        <button type="button" class="tab-btn" id="btn-tab-home-meter" style="flex:1; min-inline-size:210px; justify-content:center;">
+          📡 เช็คชั่วโมงเครื่องตัวเองแบบ Real-time (ESP32)
+        </button>
+      </div>
+
+      <!-- TAB 1: Service Info & Console Selection for Home Installation -->
+      <div id="pane-home-service">
+        <div class="highlight-box" style="margin-block-end:1.1rem; padding:1rem 1.15rem; border-color:rgba(16,185,129,0.45); background:linear-gradient(135deg, rgba(16,185,129,0.12), rgba(15,23,42,0.9));">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:0.75rem; margin-block-end:0.65rem;">
+            <div>
+              <span class="badge badge-emerald">⚡ TAKEIT HOME CONSOLE + ESP32 SMART METER</span>
+              <h3 style="margin:0.35rem 0 0.25rem; font-size:1.1rem; color:#f8fafc;">
+                อยากมีเครื่อง PS5 / Switch / Xbox เล่นที่บ้านแบบไม่ต้องซื้อเครื่องเต็มราคา?
+              </h3>
+            </div>
+            <button type="button" class="btn btn-outline btn-sm" id="btn-switch-to-meter-tab">
+              📡 มีเครื่องติดตั้งที่บ้านแล้ว? กดเช็คชั่วโมง Real-time →
+            </button>
+          </div>
+          <ol class="rental-steps" style="font-size:0.86rem; gap:0.5rem;">
+            <li>
+              <span class="step-num" style="background:var(--accent-emerald);">1</span>
+              <div><strong>จ่ายเฉพาะ "ค่าติดตั้งเครื่องที่บ้าน" ในวันนัดติดตั้ง:</strong> ทีมงาน TakeIT นำเครื่องคอนโซลพร้อมจอยและสายสัญญาณไปติดตั้งให้ถึงบ้าน</div>
+            </li>
+            <li>
+              <span class="step-num" style="background:var(--accent-emerald);">2</span>
+              <div><strong>คิดค่ารายชั่วโมงตามจริงเมื่อเปิดเครื่องเล่น (Postpaid):</strong> ตัวเครื่องเชื่อมต่อกับสมาร์ทบอร์ด <strong>ESP32</strong> ซึ่งจะนับเวลาเฉพาะตอนที่คุณเปิดเครื่องเล่นจริงเท่านั้น ปิดเครื่องเมื่อไหร่หยุดนับทันที</div>
+            </li>
+            <li>
+              <span class="step-num" style="background:var(--accent-emerald);">3</span>
+              <div><strong>เช็คชั่วโมงและค่าใช้จ่ายแบบ Real-time 24 ชม.:</strong> ลูกค้าสามารถกดเข้ามาที่แท็บ <em>"📡 เช็คชั่วโมงเครื่องตัวเองแบบ Real-time"</em> เพื่อดูเวลาใช้งานสะสมและยอดเงินรายชั่วโมงได้แบบวินาทีต่อวินาที</div>
+            </li>
+          </ol>
+        </div>
+
+        <h4 style="margin:0 0 0.75rem; font-size:0.98rem; color:var(--accent-cyan);">
+          🕹️ เลือกรุ่นเครื่องคอนโซลที่คุณสนใจให้ทีมงานนำไปติดตั้งที่บ้าน:
+        </h4>
+        <div id="home-console-catalog-list" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(250px, 1fr)); gap:0.9rem;"></div>
+      </div>
+
+      <!-- TAB 2: Real-time ESP32 Console Usage Meter Dashboard -->
+      <div id="pane-home-meter" hidden>
+        <div class="highlight-box" style="margin-block-end:1rem; padding:1rem 1.15rem; border-color:rgba(56,189,248,0.45); background:rgba(15,23,42,0.85);">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; margin-block-end:0.65rem;">
+            <div>
+              <strong style="color:var(--accent-cyan); font-size:0.98rem; display:block;">
+                📡 ระบบเช็คชั่วโมงเครื่องคอนโซลแบบ Real-time (เชื่อมต่อบอร์ด ESP32 โดยตรง)
+              </strong>
+              <span style="font-size:0.82rem; color:var(--text-secondary);">
+                กรอก <strong>รหัสเครื่อง / รหัสบอร์ด ESP32</strong> (เช่น <code>ESP32-PS5-01</code>), <strong>รหัสคำสั่งซื้อ</strong> หรือ <strong>เบอร์โทรศัพท์ของคุณ</strong> เพื่อดูเวลาเปิดเครื่องและยอดค่ารายชั่วโมงสะสมแบบสดๆ
+              </span>
+            </div>
+            <span id="esp32-cloud-sync-indicator" class="badge badge-emerald" style="font-size:0.74rem;">
+              🟢 เชื่อมต่อสัญญาณ Real-time พร้อมใช้งาน
+            </span>
+          </div>
+
+          <form id="esp32-lookup-form" style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+            <input
+              type="search"
+              id="esp32-lookup-input"
+              placeholder="พิมพ์รหัสบอร์ด เช่น ESP32-PS5-01 หรือเบอร์โทรศัพท์ 08xxxxxxxx..."
+              style="flex:1; min-inline-size:220px;"
+              aria-label="ค้นหาเครื่องคอนโซลหรือรหัสบอร์ด ESP32"
+            >
+            <button type="submit" class="btn btn-primary">
+              🔍 เช็คชั่วโมงเครื่อง Real-time
+            </button>
+          </form>
+
+          <div id="esp32-quick-devices-bar" style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap; margin-block-start:0.65rem; font-size:0.78rem; color:var(--text-muted);"></div>
+        </div>
+
+        <div id="esp32-live-meter-results" aria-live="polite"></div>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- ========================================================================
+       DIALOG 11: Admin Create / Edit ESP32 Home Console Session Modal
+       ======================================================================== -->
+  <dialog id="dialog-admin-esp32-session" closedby="any" aria-labelledby="admin-esp32-modal-title" style="max-inline-size: min(640px, 95vw);">
+    <div class="dialog-header">
+      <h2 id="admin-esp32-modal-title">📡 ตั้งค่าเครื่องเช่าติดตั้งที่บ้าน &amp; ผูกบอร์ด ESP32</h2>
+      <button type="button" class="btn btn-outline btn-sm" data-close-dialog="dialog-admin-esp32-session" aria-label="ปิดหน้าต่าง">✕ ปิด</button>
+    </div>
+    <form id="admin-esp32-session-form" class="dialog-body">
+      <input type="hidden" id="esp32-session-id">
+
+      <div class="form-grid-2">
+        <div class="field">
+          <label for="esp32-device-id-input">รหัสบอร์ด ESP32 (Device ID) *</label>
+          <span class="hint">ต้องตรงกับรหัสในโค้ดบอร์ด ESP32 เช่น <code>ESP32-PS5-01</code></span>
+          <input type="text" id="esp32-device-id-input" required placeholder="เช่น ESP32-PS5-01">
+        </div>
+
+        <div class="field">
+          <label for="esp32-console-select">รุ่นเครื่องคอนโซลที่ติดตั้ง *</label>
+          <span class="hint">เลือกเครื่องเพื่อดึงค่าติดตั้งและเรทรายชั่วโมงอัตโนมัติ</span>
+          <select id="esp32-console-select" required></select>
+        </div>
+      </div>
+
+      <div class="form-grid-2">
+        <div class="field">
+          <label for="esp32-install-fee-input">ค่าติดตั้งเครื่องที่บ้าน (บาท) *</label>
+          <input type="number" id="esp32-install-fee-input" min="0" step="1" value="400" required>
+        </div>
+
+        <div class="field">
+          <label for="esp32-hourly-rate-input">เรทรายชั่วโมง (บาท / ชั่วโมง - Postpaid) *</label>
+          <input type="number" id="esp32-hourly-rate-input" min="0" step="1" value="30" required>
+        </div>
+      </div>
+
+      <div class="form-grid-2">
+        <div class="field">
+          <label for="esp32-cust-name-input">ชื่อลูกค้าที่ติดตั้งเครื่อง *</label>
+          <input type="text" id="esp32-cust-name-input" required placeholder="เช่น คุณสมชาย เกมเมอร์">
+        </div>
+
+        <div class="field">
+          <label for="esp32-cust-phone-input">เบอร์โทรศัพท์ลูกค้า (ใช้ค้นหาชั่วโมงได้) *</label>
+          <input type="tel" id="esp32-cust-phone-input" required placeholder="เช่น 0812345678">
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="esp32-cust-address-input">บ้านเลขที่ / สถานที่ติดตั้งเครื่อง</label>
+        <input type="text" id="esp32-cust-address-input" placeholder="ระบุหมู่บ้าน/คอนโดที่ติดตั้งเครื่องคอนโซล">
+      </div>
+
+      <div class="form-grid-2">
+        <div class="field">
+          <label for="esp32-initial-hours-input">ชั่วโมงสะสมตั้งต้นในรอบบิลนี้ (ชั่วโมง)</label>
+          <span class="hint">ใส่ 0 สำหรับเริ่มรอบใหม่ หรือปรับแก้ชั่วโมงได้</span>
+          <input type="number" id="esp32-initial-hours-input" min="0" step="0.01" value="0">
+        </div>
+
+        <div class="field">
+          <label for="esp32-power-status-select">สถานะบอร์ด ESP32 ปัจจุบัน</label>
+          <span class="hint">บอร์ด ESP32 จะอัปเดตสถานะนี้อัตโนมัติเมื่อเปิด/ปิดเครื่อง</span>
+          <select id="esp32-power-status-select">
+            <option value="online">🟢 เครื่องเปิดอยู่ (ONLINE - กำลังนับเวลาเรียลไทม์)</option>
+            <option value="standby">⚪ เครื่องปิดพักอยู่ (STANDBY - หยุดนับเวลา)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="dialog-footer" style="padding-inline:0; padding-block-end:0; background:transparent;">
+        <button type="button" class="btn btn-outline" data-close-dialog="dialog-admin-esp32-session">ยกเลิก</button>
+        <button type="submit" class="btn btn-emerald">💾 บันทึกข้อมูลเครื่อง &amp; บอร์ด ESP32</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Toast Container -->
   <div id="toast-container" class="toast-container" aria-live="polite"></div>
 
   <!-- HEIC/HEIF image decoder for Apple iPhone photos in Chrome & other browsers -->
   <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js" defer></script>
-  <script src="app.js?v=20261115-mobile1" defer></script>
+  <script src="app.js?v=20261116-esp32-5" defer></script>
 </body>
 </html>
 
