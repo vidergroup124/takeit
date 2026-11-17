@@ -447,7 +447,8 @@ function ensureProductGalleryImages(products) {
     const hourlyRate = p.hourlyRate !== undefined && p.hourlyRate !== ''
       ? Number(p.hourlyRate)
       : (def?.hourlyRate ?? (isConsole ? 30 : 0));
-    const esp32DeviceId = p.esp32DeviceId || def?.esp32DeviceId || (isConsole ? `ESP32-${String(p.platform || 'CON').toUpperCase()}-01` : '');
+    const rawDevId = p.esp32DeviceId || def?.esp32DeviceId || (isConsole ? (String(p.platform || '').toUpperCase() === 'PS4' ? 'PS4_01' : `ESP32-${String(p.platform || 'CON').toUpperCase()}-01`) : '');
+    const esp32DeviceId = (rawDevId === 'ESP32-PS4-01') ? 'PS4_01' : rawDevId;
 
     return {
       ...p,
@@ -645,7 +646,15 @@ async function loadInitialData() {
     const savedConsoleSessions = localStorage.getItem(STORAGE_KEYS.CONSOLE_SESSIONS);
     if (savedConsoleSessions) {
       try {
-        state.consoleSessions = JSON.parse(savedConsoleSessions);
+        const parsedSessions = JSON.parse(savedConsoleSessions);
+        if (Array.isArray(parsedSessions)) {
+          state.consoleSessions = parsedSessions.map((s) => {
+            if ((s.id === 'ESP32-PS4-01' || s.deviceId === 'ESP32-PS4-01') && (!s.customerPhone || s.customerName === 'พร้อมเชื่อมบอร์ด ESP32 ของลูกค้า')) {
+              return { ...s, isDeleted: true, deletedAtMs: s.deletedAtMs || Date.now() };
+            }
+            return s;
+          });
+        }
       } catch (e) {}
     }
     state.isAdmin = sessionStorage.getItem(STORAGE_KEYS.ADMIN_SESSION) === 'true';
@@ -918,20 +927,44 @@ async function initCloudConnection() {
             const rawData = d.data();
             const devKey = String(rawData.console_name || rawData.deviceId || rawData.esp32DeviceId || d.id).trim();
             const prev = existingMap.get(devKey) || {};
+            const wasDeleted = Boolean(prev.isDeleted || rawData.isDeleted);
+            const deletedAtMs = Math.max(Number(prev.deletedAtMs || 0), Number(rawData.deletedAtMs || 0));
+            const espEpochMs = Number(rawData.last_timestamp || 0) > 1700000000 ? Number(rawData.last_timestamp) * 1000 : 0;
+
+            // Keep deleted items deleted unless real ESP32 hardware sent a brand-new heartbeat after deletion
+            if (wasDeleted && !(espEpochMs > 0 && espEpochMs > deletedAtMs + 5000)) {
+              existingMap.set(devKey, {
+                ...prev,
+                ...rawData,
+                id: devKey,
+                deviceId: devKey,
+                isDeleted: true,
+                deletedAtMs: deletedAtMs || Date.now()
+              });
+              return;
+            }
+
+            // Auto-suppress legacy placeholder ESP32-PS4-01 if it has no real hardware heartbeat
+            if (devKey === 'ESP32-PS4-01' && !espEpochMs && (!rawData.customerPhone || rawData.customerName === 'พร้อมเชื่อมบอร์ด ESP32 ของลูกค้า')) {
+              existingMap.set(devKey, { id: devKey, deviceId: devKey, isDeleted: true, deletedAtMs: Date.now() });
+              return;
+            }
+
             const mergedRaw = {
               ...prev,
               ...rawData,
               id: devKey,
-              deviceId: devKey
+              deviceId: devKey,
+              isDeleted: false
             };
             const norm = normalizeEsp32SessionRecord(mergedRaw, devKey);
-            if (norm && !norm.isDeleted) {
+            if (norm) {
               existingMap.set(devKey, norm);
             }
           });
-          const liveSessions = Array.from(existingMap.values()).filter((s) => !s.isDeleted);
-          liveSessions.sort((a, b) => Number(b.updatedAtMs || 0) - Number(a.updatedAtMs || 0));
-          state.consoleSessions = liveSessions;
+          const allRecords = Array.from(existingMap.values());
+          allRecords.sort((a, b) => Number(b.updatedAtMs || 0) - Number(a.updatedAtMs || 0));
+          state.consoleSessions = allRecords;
           saveStateLocally();
           updateEsp32BadgeCount();
           refreshEsp32ViewsIfOpen();
@@ -5230,7 +5263,7 @@ function normalizeEsp32SessionRecord(raw, docId = '') {
   // Heartbeat detection from ESP32's last_timestamp (epoch seconds, sent every 60s while console is powered on)
   const espEpochSec = Number(raw.last_timestamp || 0);
   const nowSec = Math.floor(Date.now() / 1000);
-  const hasRecentEspHeartbeat = espEpochSec > 1700000000 && (nowSec - espEpochSec) <= 105;
+  const hasRecentEspHeartbeat = espEpochSec > 1700000000 && (nowSec - espEpochSec) <= 75;
 
   const isOnline = Boolean(
     hasRecentEspHeartbeat ||
@@ -5240,7 +5273,7 @@ function normalizeEsp32SessionRecord(raw, docId = '') {
     raw.powerOn === true ||
     raw.isRunning === true ||
     raw.consoleOn === true
-  ) && !(espEpochSec > 1700000000 && (nowSec - espEpochSec) > 105 && !raw.manualSimulatedOnline);
+  ) && !(espEpochSec > 1700000000 && (nowSec - espEpochSec) > 75 && !raw.manualSimulatedOnline);
 
   const inferredPlatform = deviceId.toUpperCase().includes('PS4')
     ? 'PS4'
@@ -5288,9 +5321,11 @@ function getLiveEsp32SessionStats(session) {
   let totalSec = Number(norm.baseAccumulatedSeconds || 0);
   if (norm.powerStatus === 'online' && norm.lastStartTimeMs) {
     const elapsedSec = Math.max(0, Math.floor((Date.now() - Number(norm.lastStartTimeMs)) / 1000));
-    // If driven by ESP32 60-second heartbeat, cap smooth interpolation to 59s until next 1-minute packet arrives
     const hasEspEpoch = Number(norm.last_timestamp || 0) > 1700000000 && !norm.manualSimulatedOnline;
-    totalSec += hasEspEpoch ? Math.min(59, elapsedSec) : elapsedSec;
+    // Use exact confirmed minutes from real ESP32 hardware so unplugging never counts fake seconds or resets back
+    if (!hasEspEpoch) {
+      totalSec += elapsedSec;
+    }
   }
   const hrs = Math.floor(totalSec / 3600);
   const mins = Math.floor((totalSec % 3600) / 60);
@@ -5344,9 +5379,20 @@ async function deleteEsp32SessionFromCloud(sessionId) {
   if (!sessionId) return;
   if (state.firestoreDb && state.firebaseModules) {
     try {
-      const { doc, deleteDoc } = state.firebaseModules;
-      await deleteDoc(doc(state.firestoreDb, 'takeit_console_sessions', sessionId));
-      await deleteDoc(doc(state.firestoreDb, 'ps4_tracker', sessionId));
+      const { doc, setDoc, deleteDoc } = state.firebaseModules;
+      const nowMs = Date.now();
+      const tombstone = {
+        id: sessionId,
+        deviceId: sessionId,
+        console_name: sessionId,
+        isDeleted: true,
+        deletedAtMs: nowMs,
+        updatedAtMs: nowMs
+      };
+      await setDoc(doc(state.firestoreDb, 'takeit_console_sessions', sessionId), tombstone, { merge: true }).catch(() => {});
+      await setDoc(doc(state.firestoreDb, 'ps4_tracker', sessionId), tombstone, { merge: true }).catch(() => {});
+      await deleteDoc(doc(state.firestoreDb, 'takeit_console_sessions', sessionId)).catch(() => {});
+      await deleteDoc(doc(state.firestoreDb, 'ps4_tracker', sessionId)).catch(() => {});
     } catch (err) {
       console.warn('Firestore delete ESP32 session warning:', err);
     }
@@ -5616,7 +5662,7 @@ function renderEsp32LiveMeterResults(rawQuery = '') {
       : s.customerName;
 
     return `
-      <div class="esp32-meter-card ${stats.isOnline ? '' : 'is-standby'}" data-esp32-card-id="${escapeXml(s.id)}">
+      <div class="esp32-meter-card ${stats.isOnline ? '' : 'is-standby'}" data-esp32-card-id="${escapeXml(s.id)}" data-esp32-online="${stats.isOnline ? 'true' : 'false'}">
         <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:0.65rem; border-block-end:1px solid rgba(255,255,255,0.08); padding-block-end:0.75rem;">
           <div>
             <div style="display:flex; align-items:center; gap:0.45rem; flex-wrap:wrap;">
@@ -5718,8 +5764,15 @@ function renderEsp32LiveMeterResults(rawQuery = '') {
 
 function updateLiveEsp32DomReadouts() {
   const allSessions = getAllSearchableEsp32Sessions();
+  let statusChanged = false;
   allSessions.forEach((s) => {
     const stats = getLiveEsp32SessionStats(s);
+    const liveStr = stats.isOnline ? 'true' : 'false';
+    document.querySelectorAll(`[data-esp32-card-id="${s.id}"]`).forEach((cardEl) => {
+      if (cardEl.getAttribute('data-esp32-online') !== liveStr) {
+        statusChanged = true;
+      }
+    });
     document.querySelectorAll(`[data-esp32-clock="${s.id}"]`).forEach((el) => {
       el.textContent = stats.digitalClock;
     });
@@ -5730,6 +5783,10 @@ function updateLiveEsp32DomReadouts() {
       el.textContent = stats.liveCostFormatted;
     });
   });
+
+  if (statusChanged) {
+    refreshEsp32ViewsIfOpen();
+  }
 }
 
 function startEsp32LiveTicker() {
@@ -5814,7 +5871,7 @@ function renderAdminEsp32Sessions() {
   container.innerHTML = sessions.map((s) => {
     const stats = getLiveEsp32SessionStats(s);
     return `
-      <div class="esp32-meter-card ${stats.isOnline ? '' : 'is-standby'}" style="margin-block-end:0;">
+      <div class="esp32-meter-card ${stats.isOnline ? '' : 'is-standby'}" data-esp32-card-id="${escapeXml(s.id)}" data-esp32-online="${stats.isOnline ? 'true' : 'false'}" style="margin-block-end:0;">
         <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:0.75rem; margin-block-end:0.65rem;">
           <div>
             <span class="platform-pill platform-${escapeXml(s.platform)}">${escapeXml(s.platform)}</span>
@@ -5902,6 +5959,9 @@ function renderAdminEsp32Sessions() {
       const stats = getLiveEsp32SessionStats(target);
       const nowMs = Date.now();
       target.baseAccumulatedSeconds = 0;
+      target.total_minutes = 0;
+      target.total_hours = 0;
+      target.session_minutes = 0;
       target.lastStartTimeMs = stats.isOnline ? nowMs : null;
       target.updatedAtMs = nowMs;
       target.lastHeartbeatFormatted = new Date(nowMs).toLocaleString('th-TH');
@@ -5915,7 +5975,16 @@ function renderAdminEsp32Sessions() {
   container.querySelectorAll('[data-admin-esp32-del]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const id = btn.getAttribute('data-admin-esp32-del');
-      state.consoleSessions = (state.consoleSessions || []).filter((s) => s.id !== id && s.deviceId !== id);
+      const nowMs = Date.now();
+      if (!Array.isArray(state.consoleSessions)) state.consoleSessions = [];
+      const existing = state.consoleSessions.find((s) => s.id === id || s.deviceId === id);
+      if (existing) {
+        existing.isDeleted = true;
+        existing.deletedAtMs = nowMs;
+        existing.updatedAtMs = nowMs;
+      } else {
+        state.consoleSessions.push({ id, deviceId: id, isDeleted: true, deletedAtMs: nowMs, updatedAtMs: nowMs });
+      }
       saveStateLocally();
       await deleteEsp32SessionFromCloud(id);
       updateEsp32BadgeCount();
