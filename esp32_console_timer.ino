@@ -33,6 +33,7 @@ String sessionStartStr = "";
 unsigned long sessionSeconds = 0;
 unsigned long lastSyncedTotalSeconds = 0;
 unsigned int syncCounter = 0;
+bool hasSyncedCloudBaseline = false;
 
 // ฟังก์ชันดึงเวลาปัจจุบัน
 String getFormattedTime(const char* format) {
@@ -73,50 +74,63 @@ long extractFirestoreInt(const String& payload, const char* fieldName, long fall
   return fallback;
 }
 
-// ฟังก์ชันอ่านจำนวนวินาทีสะสมเดิมจาก Firebase Firestore (คอลเลกชัน ps4_tracker ของเว็บ TakeIT)
-unsigned long getCurrentTotalSeconds() {
-  WiFiClientSecure client;
-  client.setInsecure();
-  HTTPClient http;
-  http.setTimeout(15000);
+// ฟังก์ชันอ่านจำนวนวินาทีสะสมเดิมจาก Firebase Firestore (คืนค่า true เมื่ออ่านสำเร็จ เพื่อป้องกันการเขียน 0 ทับยอดเดิม)
+bool fetchCloudTotalSeconds(unsigned long& outSecs) {
+  for (int attempt = 0; attempt < 2; attempt++) {
+    WiFiClientSecure client;
+    client.setInsecure();
+    HTTPClient http;
+    http.setTimeout(15000);
 
-  String url = "https://firestore.googleapis.com/v1/projects/" + FIREBASE_PROJECT_ID +
-               "/databases/(default)/documents/ps4_tracker/" + CONSOLE_ID +
-               "?key=" + FIREBASE_API_KEY;
+    String url = "https://firestore.googleapis.com/v1/projects/" + FIREBASE_PROJECT_ID +
+                 "/databases/(default)/documents/ps4_tracker/" + CONSOLE_ID +
+                 "?key=" + FIREBASE_API_KEY;
 
-  http.begin(client, url);
-  int httpResponseCode = http.GET();
-  unsigned long totalSecs = lastSyncedTotalSeconds;
+    http.begin(client, url);
+    int httpResponseCode = http.GET();
 
-  if (httpResponseCode == 200) {
-    String payload = http.getString();
-    long secsVal = extractFirestoreInt(payload, "total_seconds", -1);
-    long minsVal = extractFirestoreInt(payload, "total_minutes", 0);
-    if (minsVal < 0) minsVal = 0;
-    if (secsVal >= 0 && (secsVal / 60) == minsVal) {
-      totalSecs = (unsigned long)secsVal;
+    if (httpResponseCode == 200) {
+      String payload = http.getString();
+      http.end();
+      long secsVal = extractFirestoreInt(payload, "total_seconds", -1);
+      long minsVal = extractFirestoreInt(payload, "total_minutes", 0);
+      if (minsVal < 0) minsVal = 0;
+      if (secsVal >= 0 && (secsVal / 60) == minsVal) {
+        outSecs = (unsigned long)secsVal;
+      } else {
+        outSecs = (unsigned long)minsVal * 60UL;
+      }
+      return true;
+    } else if (httpResponseCode == 404) {
+      http.end();
+      outSecs = 0;
+      return true;
     } else {
-      totalSecs = (unsigned long)minsVal * 60UL;
+      Serial.printf("[Firebase GET Warning attempt %d] Code: %d (%s)\n",
+                    attempt + 1, httpResponseCode, http.errorToString(httpResponseCode).c_str());
+      http.end();
+      delay(600);
     }
-  } else {
-    Serial.printf("[Firebase GET Warning] Code: %d (%s)\n", httpResponseCode, http.errorToString(httpResponseCode).c_str());
   }
-  http.end();
-  return totalSecs;
+  return false;
 }
 
 // ฟังก์ชันส่งข้อมูลอัปเดตเข้า Firebase ตัวเดิมของเว็บ TakeIT (อัปเดตหน้าเว็บแบบ Real-time ทันที)
 void updateFirebase(bool isInitialBoot, unsigned long deltaSeconds = 0) {
   if (WiFi.status() != WL_CONNECTED) return;
 
-  // เช็กยอดสะสมจาก Cloud เฉพาะตอนเปิดเครื่อง และทุกๆ 1 นาที (ลดการใช้ TLS ซ้อนกันและประหยัด Read)
+  // เช็กยอดสะสมจาก Cloud ตอนเปิดเครื่อง (หรือยังไม่เคยซิงค์ฐานเวลา) และทุกๆ 1 นาที
   unsigned long totalSeconds = lastSyncedTotalSeconds;
-  if (isInitialBoot || (syncCounter % 4 == 0)) {
-    totalSeconds = getCurrentTotalSeconds();
+  if (!hasSyncedCloudBaseline || isInitialBoot || (syncCounter % 4 == 0)) {
+    unsigned long cloudSecs = 0;
+    if (fetchCloudTotalSeconds(cloudSecs)) {
+      hasSyncedCloudBaseline = true;
+      totalSeconds = cloudSecs;
+    }
   }
 
   if (!isInitialBoot) {
-    if (totalSeconds == 0 && lastSyncedTotalSeconds >= (unsigned long)heartbeatIntervalSec) {
+    if (hasSyncedCloudBaseline && totalSeconds == 0 && lastSyncedTotalSeconds >= (unsigned long)heartbeatIntervalSec) {
       sessionSeconds = 0; // กรณีแอดมินกดรีเซ็ตบิลบนหน้าเว็บ
     }
     totalSeconds += deltaSeconds;
@@ -129,20 +143,29 @@ void updateFirebase(bool isInitialBoot, unsigned long deltaSeconds = 0) {
   float totalHours = round((totalSeconds / 3600.0) * 100.0) / 100.0;
   String currentTimeStr = getFormattedTime("%d/%m/%Y %H:%M:%S");
   unsigned long currentEpoch = getEpochTime();
+  if (currentEpoch == 0) {
+    struct tm retryTm;
+    getLocalTime(&retryTm, 2000);
+    currentEpoch = getEpochTime();
+    currentTimeStr = getFormattedTime("%d/%m/%Y %H:%M:%S");
+  }
 
   // อัปเดตเฉพาะฟิลด์เวลาของบอร์ด โดยไม่ทับข้อมูลชื่อลูกค้าหรือเรทราคาที่แอดมินตั้งไว้บนเว็บ
+  // หากยังอ่านยอดเดิมจาก Cloud ไม่ได้ ห้ามส่ง total_seconds/total_minutes ทับเด็ดขาด!
   String updateMask = "updateMask.fieldPaths=console_name"
                       "&updateMask.fieldPaths=deviceId"
                       "&updateMask.fieldPaths=heartbeat_interval"
-                      "&updateMask.fieldPaths=total_seconds"
-                      "&updateMask.fieldPaths=total_minutes"
-                      "&updateMask.fieldPaths=total_hours"
                       "&updateMask.fieldPaths=last_active"
                       "&updateMask.fieldPaths=last_timestamp"
                       "&updateMask.fieldPaths=current_session"
                       "&updateMask.fieldPaths=session_start"
-                      "&updateMask.fieldPaths=session_minutes"
                       "&updateMask.fieldPaths=powerStatus";
+  if (hasSyncedCloudBaseline) {
+    updateMask += "&updateMask.fieldPaths=total_seconds"
+                  "&updateMask.fieldPaths=total_minutes"
+                  "&updateMask.fieldPaths=total_hours"
+                  "&updateMask.fieldPaths=session_minutes";
+  }
 
   String firestoreUrl = "https://firestore.googleapis.com/v1/projects/" + FIREBASE_PROJECT_ID +
                         "/databases/(default)/documents/ps4_tracker/" + CONSOLE_ID +
@@ -153,14 +176,16 @@ void updateFirebase(bool isInitialBoot, unsigned long deltaSeconds = 0) {
   body += "\"console_name\":{\"stringValue\":\"" + CONSOLE_ID + "\"},";
   body += "\"deviceId\":{\"stringValue\":\"" + CONSOLE_ID + "\"},";
   body += "\"heartbeat_interval\":{\"integerValue\":\"" + String(heartbeatIntervalSec) + "\"},";
-  body += "\"total_seconds\":{\"integerValue\":\"" + String(totalSeconds) + "\"},";
-  body += "\"total_minutes\":{\"integerValue\":\"" + String(totalMinutes) + "\"},";
-  body += "\"total_hours\":{\"doubleValue\":" + String(totalHours, 2) + "},";
+  if (hasSyncedCloudBaseline) {
+    body += "\"total_seconds\":{\"integerValue\":\"" + String(totalSeconds) + "\"},";
+    body += "\"total_minutes\":{\"integerValue\":\"" + String(totalMinutes) + "\"},";
+    body += "\"total_hours\":{\"doubleValue\":" + String(totalHours, 2) + "},";
+    body += "\"session_minutes\":{\"integerValue\":\"" + String(sessionMinutes) + "\"},";
+  }
   body += "\"last_active\":{\"stringValue\":\"" + currentTimeStr + "\"},";
   body += "\"last_timestamp\":{\"integerValue\":\"" + String(currentEpoch) + "\"},";
   body += "\"current_session\":{\"stringValue\":\"" + sessionID + "\"},";
   body += "\"session_start\":{\"stringValue\":\"" + sessionStartStr + "\"},";
-  body += "\"session_minutes\":{\"integerValue\":\"" + String(sessionMinutes) + "\"},";
   body += "\"powerStatus\":{\"stringValue\":\"online\"}";
   body += "}}";
 

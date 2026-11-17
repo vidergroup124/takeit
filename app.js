@@ -1068,11 +1068,29 @@ async function initCloudConnection() {
               return;
             }
 
+            const prevEpoch = Number(prev.last_timestamp || 0);
+            const cloudEpoch = Number(rawData.last_timestamp || 0);
+            const hasNewerHardwareHeartbeat = cloudEpoch > 1700000000 && cloudEpoch > prevEpoch;
+
             const prevFresh = getFreshnessMs(prev);
             const cloudFresh = getFreshnessMs(rawData);
-            const mergedRaw = prevFresh > cloudFresh
-              ? { ...rawData, ...prev, id: devKey, deviceId: devKey, isDeleted: false }
-              : { ...prev, ...rawData, id: devKey, deviceId: devKey, isDeleted: false };
+            let mergedRaw;
+            if (hasNewerHardwareHeartbeat) {
+              // Real hardware just sent a newer heartbeat — let hardware telemetry win cleanly
+              mergedRaw = {
+                ...prev,
+                ...rawData,
+                manualSimulatedOnline: false,
+                manualStandbyAtSec: (prev.manualStandbyAtSec && cloudEpoch > Number(prev.manualStandbyAtSec)) ? 0 : (rawData.manualStandbyAtSec || prev.manualStandbyAtSec || 0),
+                id: devKey,
+                deviceId: devKey,
+                isDeleted: false
+              };
+            } else {
+              mergedRaw = prevFresh > cloudFresh
+                ? { ...rawData, ...prev, id: devKey, deviceId: devKey, isDeleted: false }
+                : { ...prev, ...rawData, id: devKey, deviceId: devKey, isDeleted: false };
+            }
 
             const norm = normalizeEsp32SessionRecord(mergedRaw, devKey);
             if (norm) {
@@ -5424,10 +5442,13 @@ function normalizeEsp32SessionRecord(raw, docId = '') {
 
   if (espEpochSec > 1700000000) {
     const prevSync = esp32ClientSyncTracker.get(deviceId);
-    if (!prevSync || prevSync.espEpochSec !== espEpochSec) {
+    if (!prevSync) {
       const ageMs = Math.max(0, Date.now() - (espEpochSec * 1000));
-      const anchorMs = ageMs <= 15000 ? Date.now() : (espEpochSec * 1000);
+      const anchorMs = ageMs <= 25000 ? Date.now() : (espEpochSec * 1000);
       esp32ClientSyncTracker.set(deviceId, { espEpochSec, baseSeconds, anchorMs });
+    } else if (prevSync.espEpochSec !== espEpochSec) {
+      // Live packet with a newer hardware epoch just arrived — anchor directly to Date.now() (immune to NTP vs local clock skew)
+      esp32ClientSyncTracker.set(deviceId, { espEpochSec, baseSeconds, anchorMs: Date.now() });
     }
   }
 
@@ -6176,9 +6197,17 @@ function renderAdminEsp32Sessions() {
           anchorMs: nowMs
         });
       } else {
-        esp32ClientSyncTracker.delete(trackerKey);
-        if (target.last_timestamp) {
-          target.manualStandbyAtSec = Number(target.last_timestamp);
+        target.manualSimulatedOnline = false;
+        const lastTs = Number(target.last_timestamp || 0);
+        if (lastTs > 0) {
+          target.manualStandbyAtSec = lastTs;
+          esp32ClientSyncTracker.set(trackerKey, {
+            espEpochSec: lastTs,
+            baseSeconds: 0,
+            anchorMs: lastTs * 1000
+          });
+        } else {
+          esp32ClientSyncTracker.delete(trackerKey);
         }
       }
       saveStateLocally();
