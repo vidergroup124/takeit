@@ -855,6 +855,9 @@ async function initCloudConnection() {
           state.products = sortProductsCatalog(ensureProductGalleryImages(liveProducts));
           saveStateLocally();
           renderStorefront();
+          if (document.getElementById('dialog-cart')?.open) {
+            renderCartModalContents();
+          }
           if (state.isAdmin) {
             renderAdminStats();
             renderAdminProductsTable();
@@ -1638,6 +1641,9 @@ async function logoutCustomer() {
 function renderAll() {
   renderStorefront();
   renderCartBadge();
+  if (document.getElementById('dialog-cart')?.open) {
+    renderCartModalContents();
+  }
   renderAdminVisibility();
   renderCustomerAuthUI();
   updateSupportBadgeCount();
@@ -2074,9 +2080,13 @@ function openRentalCalculatorModal(productId) {
   const startDateInput = document.getElementById('rent-start-date');
   const qtyInput = document.getElementById('rent-qty-input');
 
+  const maxStock = getProductAvailableStock(product);
+  const inCartQty = getProductQtyInCart(product.id);
+  const remainingStock = Math.max(0, maxStock - inCartQty);
+
   daysInput.value = '7';
   qtyInput.value = '1';
-  qtyInput.max = String(Math.max(1, product.stock || 5));
+  qtyInput.max = String(Math.max(1, remainingStock));
 
   const todayStr = new Date().toISOString().slice(0, 10);
   startDateInput.value = todayStr;
@@ -2121,9 +2131,27 @@ function updateRentalCalculatorBreakdown() {
 // ============================================================================
 // Cart & Guest Checkout Logic
 // ============================================================================
+function getProductAvailableStock(product) {
+  if (!product || product.status !== 'ready') return 0;
+  return Math.max(0, Number(product.stock || 0));
+}
+
+function getProductQtyInCart(productId) {
+  return (state.cart || []).reduce((sum, item) => (
+    item.productId === productId ? sum + Math.max(1, Number(item.qty || 1)) : sum
+  ), 0);
+}
+
 function addToCartBuy(productId) {
   const product = state.products.find((p) => p.id === productId);
   if (!product) return;
+
+  const maxStock = getProductAvailableStock(product);
+  const inCart = getProductQtyInCart(productId);
+  if (maxStock <= 0 || inCart >= maxStock) {
+    showToast(`⚠️ ไม่สามารถเพิ่ม "${product.name}" ได้อีก (สินค้าในสต็อกครบจำนวน ${maxStock} ชิ้นแล้ว — รอแอดมินเพิ่มสต็อก)`, 'warning');
+    return;
+  }
 
   const unitShippingFee = getProductShippingFee(product);
   const existing = state.cart.find((item) => item.productId === productId && item.mode === 'buy');
@@ -2151,34 +2179,63 @@ function addToCartBuy(productId) {
 
 function addToCartRent(productId, rentDays, rentStartDate, qty) {
   const product = state.products.find((p) => p.id === productId);
-  if (!product) return;
+  if (!product) return false;
+
+  const addQty = Math.max(1, Number(qty || 1));
+  const maxStock = getProductAvailableStock(product);
+  const inCart = getProductQtyInCart(productId);
+  if (maxStock <= 0 || inCart >= maxStock) {
+    showToast(`⚠️ ไม่สามารถเพิ่ม "${product.name}" ได้อีก (สินค้าในสต็อกครบจำนวน ${maxStock} ชิ้นแล้ว — รอแอดมินเพิ่มสต็อก)`, 'warning');
+    return false;
+  }
+  if (inCart + addQty > maxStock) {
+    const remaining = maxStock - inCart;
+    showToast(`⚠️ "${product.name}" เพิ่มได้อีกสูงสุด ${remaining} ชิ้น (สต็อกมี ${maxStock} ชิ้น / ในตะกร้ามี ${inCart} ชิ้น)`, 'warning');
+    return false;
+  }
 
   const rentEndDate = addDaysToDateStr(rentStartDate, rentDays);
   const unitShippingFee = getProductShippingFee(product);
-  state.cart.push({
-    cartItemId: 'CI-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
-    productId: product.id,
-    name: product.name,
-    platform: product.platform,
-    image: product.image,
-    mode: 'rent',
-    rentDays: Number(rentDays),
-    rentRate: Number(product.rentPricePerDay || 0),
-    deposit: Number(product.rentDeposit || 0),
-    shippingFee: unitShippingFee,
-    rentStartDate,
-    rentEndDate,
-    qty: Number(qty || 1)
-  });
+  const existing = state.cart.find(
+    (item) => item.productId === productId && item.mode === 'rent' && Number(item.rentDays) === Number(rentDays) && item.rentStartDate === rentStartDate
+  );
+  if (existing) {
+    existing.qty = Number(existing.qty || 1) + addQty;
+    existing.shippingFee = unitShippingFee;
+  } else {
+    state.cart.push({
+      cartItemId: 'CI-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+      productId: product.id,
+      name: product.name,
+      platform: product.platform,
+      image: product.image,
+      mode: 'rent',
+      rentDays: Number(rentDays),
+      rentRate: Number(product.rentPricePerDay || 0),
+      deposit: Number(product.rentDeposit || 0),
+      shippingFee: unitShippingFee,
+      rentStartDate,
+      rentEndDate,
+      qty: addQty
+    });
+  }
 
   saveStateLocally();
   renderCartBadge();
   showToast(`💿 เพิ่มรายการเช่าแผ่น "${product.name}" (${rentDays} วัน) ลงตะกร้าแล้ว!`);
+  return true;
 }
 
 function addToCartHomeInstall(productId) {
   const product = state.products.find((p) => p.id === productId);
   if (!product || !product.canHomeInstall) return;
+
+  const maxStock = getProductAvailableStock(product);
+  const inCart = getProductQtyInCart(productId);
+  if (maxStock <= 0 || inCart >= maxStock) {
+    showToast(`⚠️ ไม่สามารถเพิ่ม "${product.name}" ได้อีก (สินค้าในสต็อกครบจำนวน ${maxStock} ชิ้นแล้ว — รอแอดมินเพิ่มสต็อก)`, 'warning');
+    return;
+  }
 
   const installFee = Number(product.installFee ?? 400);
   const hourlyRate = Number(product.hourlyRate ?? 30);
@@ -2210,6 +2267,40 @@ function addToCartHomeInstall(productId) {
   renderCartBadge();
   showToast(`🏠 เพิ่มรายการเช่าติดตั้งที่บ้าน "${product.name}" (ค่าติดตั้ง ${formatTHB(installFee)} | เรท ${formatTHB(hourlyRate)}/ชม.) ลงตะกร้าแล้ว!`);
   openCartModal();
+}
+
+function updateCartItemQty(cartItemId, delta) {
+  const item = (state.cart || []).find((c) => c.cartItemId === cartItemId);
+  if (!item) return;
+
+  const currentQty = Math.max(1, Number(item.qty || 1));
+  if (delta < 0) {
+    if (currentQty <= 1) return;
+    item.qty = currentQty - 1;
+    saveStateLocally();
+    renderCartBadge();
+    renderCartModalContents();
+    return;
+  }
+
+  if (delta > 0) {
+    const prod = (state.products || []).find((p) => p.id === item.productId);
+    const maxStock = getProductAvailableStock(prod);
+    const totalInCart = getProductQtyInCart(item.productId);
+    if (!prod || maxStock <= 0 || totalInCart >= maxStock) {
+      showToast(
+        `⚠️ เพิ่มจำนวน "${item.name}" ไม่ได้อีก (สต็อกคงเหลือ ${maxStock} ชิ้น — เว้นแต่แอดมินจะเพิ่มสต็อกภายหลัง)`,
+        'warning'
+      );
+      renderCartModalContents();
+      return;
+    }
+
+    item.qty = currentQty + 1;
+    saveStateLocally();
+    renderCartBadge();
+    renderCartModalContents();
+  }
 }
 
 function renderCartBadge() {
@@ -2274,14 +2365,42 @@ function renderCartModalContents() {
   filledState.hidden = false;
 
   container.innerHTML = state.cart.map((item) => {
+    const qty = Math.max(1, Number(item.qty || 1));
     const unitShip = getCartItemShippingFeePerUnit(item);
     const shipText = unitShip === 0
       ? '<span style="color:#34d399; font-weight:700;">ส่งฟรี! (฿0)</span>'
       : `<strong style="color:#38bdf8;">${formatTHB(unitShip)}</strong> <span style="font-size:0.75rem; color:var(--text-muted);">(คิดเหมาตามชิ้นที่แพงสุดครั้งเดียว)</span>`;
 
+    const prod = state.products.find((p) => p.id === item.productId);
+    const maxStock = getProductAvailableStock(prod);
+    const totalInCartForProd = getProductQtyInCart(item.productId);
+    const isAtStockLimit = !prod || maxStock <= 0 || totalInCartForProd >= maxStock;
+
+    const stockNoteHtml = !prod || maxStock <= 0
+      ? `<div style="font-size:0.75rem; color:#f87171; font-weight:600; margin-block-start:0.2rem;">❌ สินค้าหมดสต็อกชั่วคราว (รอแอดมินเติมสต็อกเพิ่ม)</div>`
+      : isAtStockLimit
+        ? `<div style="font-size:0.75rem; color:#fbbf24; font-weight:600; margin-block-start:0.2rem;">⚠️ ครบจำนวนสต็อกที่มีแล้ว (${totalInCartForProd}/${maxStock} ชิ้น — เพิ่มอีกไม่ได้จนกว่าแอดมินจะเพิ่มสต็อก)</div>`
+        : `<div style="font-size:0.75rem; color:var(--text-muted); margin-block-start:0.2rem;">📦 สต็อกคงเหลือ: ${maxStock} ชิ้น (เลือกอยู่ ${totalInCartForProd}/${maxStock} ชิ้น)</div>`;
+
+    const buildRightCol = (totalAmount, amountColor) => `
+      <div class="cart-actions-col" style="text-align:end;">
+        <div style="font-weight:800; font-size:1.05rem; color:${amountColor};">
+          ${formatTHB(totalAmount)}
+        </div>
+        <div class="cart-qty-row">
+          <div class="cart-qty-controls" role="group" aria-label="ปรับจำนวนสินค้า">
+            <button type="button" class="cart-qty-btn" data-cart-dec="${item.cartItemId}" ${qty <= 1 ? 'disabled title="จำนวนขั้นต่ำ 1 ชิ้น"' : 'title="ลดจำนวน"'} aria-label="ลดจำนวน">−</button>
+            <span class="cart-qty-val">${qty}</span>
+            <button type="button" class="cart-qty-btn" data-cart-inc="${item.cartItemId}" ${isAtStockLimit ? `disabled title="สต็อกคงเหลือเต็มจำนวน (${maxStock} ชิ้น)"` : 'title="เพิ่มจำนวน"'} aria-label="เพิ่มจำนวน">+</button>
+          </div>
+          <button type="button" class="btn btn-danger btn-sm" data-remove-cart="${item.cartItemId}">ลบ</button>
+        </div>
+      </div>
+    `;
+
     if (item.mode === 'rent') {
-      const rentCost = item.rentRate * item.rentDays * item.qty;
-      const depCost = item.deposit * item.qty;
+      const rentCost = item.rentRate * item.rentDays * qty;
+      const depCost = item.deposit * qty;
       return `
         <div class="cart-item">
           <img src="${item.image}" alt="${escapeXml(item.name)}">
@@ -2289,24 +2408,20 @@ function renderCartModalContents() {
             <span class="badge badge-purple">💿 เช่าแผ่นเกมรายวัน (${item.rentDays} วัน)</span>
             <h4 style="margin:0.25rem 0 0.15rem;">${escapeXml(item.name)} (${escapeXml(item.platform)})</h4>
             <div style="font-size:0.82rem; color:var(--text-secondary);">
-              ค่าเช่า: ${formatTHB(item.rentRate)}/วัน × ${item.rentDays} วัน × ${item.qty} แผ่น = <strong>${formatTHB(rentCost)}</strong>
+              ค่าเช่า: ${formatTHB(item.rentRate)}/วัน × ${item.rentDays} วัน × ${qty} แผ่น = <strong>${formatTHB(rentCost)}</strong>
               | ค่ามัดจำแผ่น: <strong style="color:#fcd34d;">${formatTHB(depCost)}</strong>
               | 🚚 ค่าส่งขาไป: ${shipText}
             </div>
             <div style="font-size:0.78rem; color:#34d399;">
               📅 วันเริ่มเช่า: ${formatThaiDate(item.rentStartDate)} → กำหนดส่งคืน: ${formatThaiDate(item.rentEndDate)} (🚚 ทางร้านจ่ายเงินค่าส่งของกลับให้)
             </div>
+            ${stockNoteHtml}
           </div>
-          <div style="text-align:end;">
-            <div style="font-weight:800; font-size:1.05rem; color:#e9d5ff; margin-block-end:0.4rem;">
-              ${formatTHB(rentCost + depCost)}
-            </div>
-            <button type="button" class="btn btn-danger btn-sm" data-remove-cart="${item.cartItemId}">ลบ</button>
-          </div>
+          ${buildRightCol(rentCost + depCost, '#e9d5ff')}
         </div>
       `;
     } else if (item.mode === 'home_install') {
-      const installCost = Number(item.installFee || 0) * Number(item.qty || 1);
+      const installCost = Number(item.installFee || 0) * qty;
       return `
         <div class="cart-item">
           <img src="${item.image}" alt="${escapeXml(item.name)}">
@@ -2314,22 +2429,18 @@ function renderCartModalContents() {
             <span class="badge badge-emerald">🏠 เช่าเครื่องติดตั้งที่บ้าน + คิดรายชั่วโมงตามจริง (ESP32)</span>
             <h4 style="margin:0.25rem 0 0.15rem;">${escapeXml(item.name)} (${escapeXml(item.platform)})</h4>
             <div style="font-size:0.82rem; color:var(--text-secondary);">
-              ค่าติดตั้งเครื่องที่บ้าน: <strong style="color:#34d399;">${formatTHB(item.installFee)}</strong> × ${item.qty} เครื่อง = <strong>${formatTHB(installCost)}</strong>
+              ค่าติดตั้งเครื่องที่บ้าน: <strong style="color:#34d399;">${formatTHB(item.installFee)}</strong> × ${qty} เครื่อง = <strong>${formatTHB(installCost)}</strong>
             </div>
             <div style="font-size:0.78rem; color:#38bdf8;">
               📡 เรทรายชั่วโมง: <strong>${formatTHB(item.hourlyRate)}/ชั่วโมง</strong> (คิดตามเวลาเปิดเครื่องจริงผ่านบอร์ด ESP32 แบบ Postpaid เล่นก่อนจ่ายทีหลัง)
             </div>
+            ${stockNoteHtml}
           </div>
-          <div style="text-align:end;">
-            <div style="font-weight:800; font-size:1.05rem; color:#34d399; margin-block-end:0.4rem;">
-              ${formatTHB(installCost)}
-            </div>
-            <button type="button" class="btn btn-danger btn-sm" data-remove-cart="${item.cartItemId}">ลบ</button>
-          </div>
+          ${buildRightCol(installCost, '#34d399')}
         </div>
       `;
     } else {
-      const lineTotal = item.price * item.qty;
+      const lineTotal = item.price * qty;
       return `
         <div class="cart-item">
           <img src="${item.image}" alt="${escapeXml(item.name)}">
@@ -2337,19 +2448,27 @@ function renderCartModalContents() {
             <span class="badge badge-cyan">🛒 ซื้อขาด</span>
             <h4 style="margin:0.25rem 0 0.15rem;">${escapeXml(item.name)} (${escapeXml(item.platform)})</h4>
             <div style="font-size:0.84rem; color:var(--text-secondary);">
-              ราคา ${formatTHB(item.price)} × ${item.qty} ชิ้น | 🚚 ค่าส่ง: ${shipText}
+              ราคา ${formatTHB(item.price)} × ${qty} ชิ้น | 🚚 ค่าส่ง: ${shipText}
             </div>
+            ${stockNoteHtml}
           </div>
-          <div style="text-align:end;">
-            <div style="font-weight:800; font-size:1.05rem; color:var(--accent-cyan); margin-block-end:0.4rem;">
-              ${formatTHB(lineTotal)}
-            </div>
-            <button type="button" class="btn btn-danger btn-sm" data-remove-cart="${item.cartItemId}">ลบ</button>
-          </div>
+          ${buildRightCol(lineTotal, 'var(--accent-cyan)')}
         </div>
       `;
     }
   }).join('');
+
+  container.querySelectorAll('[data-cart-dec]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      updateCartItemQty(btn.getAttribute('data-cart-dec'), -1);
+    });
+  });
+
+  container.querySelectorAll('[data-cart-inc]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      updateCartItemQty(btn.getAttribute('data-cart-inc'), 1);
+    });
+  });
 
   container.querySelectorAll('[data-remove-cart]').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -2936,8 +3055,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const days = Math.max(1, Number(document.getElementById('rent-days-input').value) || 7);
     const startDate = document.getElementById('rent-start-date').value;
     const qty = Math.max(1, Number(document.getElementById('rent-qty-input').value) || 1);
-    addToCartRent(prodId, days, startDate, qty);
-    document.getElementById('dialog-rental-calc').close();
+    const added = addToCartRent(prodId, days, startDate, qty);
+    if (added) {
+      document.getElementById('dialog-rental-calc').close();
+    }
   });
 
   // Cart & Guest Checkout
@@ -2984,6 +3105,22 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('guest-checkout-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (state.cart.length === 0) return;
+
+    // Validate stock availability per product across all cart modes
+    const requestedByProd = new Map();
+    for (const item of state.cart) {
+      requestedByProd.set(item.productId, (requestedByProd.get(item.productId) || 0) + Math.max(1, Number(item.qty || 1)));
+    }
+    for (const [prodId, neededQty] of requestedByProd.entries()) {
+      const prod = state.products.find((p) => p.id === prodId);
+      const availStock = getProductAvailableStock(prod);
+      if (!prod || availStock < neededQty) {
+        const prodName = prod?.name || 'สินค้า';
+        showToast(`⚠️ ไม่สามารถสั่งซื้อได้: "${prodName}" มีสต็อกคงเหลือ ${availStock} ชิ้น (ในตะกร้าเลือกไว้ ${neededQty} ชิ้น) กรุณาลดจำนวนหรือรอแอดมินเพิ่มสต็อก`, 'warning');
+        renderCartModalContents();
+        return;
+      }
+    }
 
     const totals = calculateCartTotals();
     const hasBuy = state.cart.some((i) => i.mode === 'buy');
@@ -4215,8 +4352,9 @@ function buildOrderContractHtml(order, options = { unmasked: true, isDraft: fals
       <div class="contract-section-title">${homeInstallClauseTitleNum}: ข้อตกลงการเช่าเครื่องคอนโซลติดตั้งที่บ้านและคิดค่าบริการรายชั่วโมงตามจริงผ่านระบบ ESP32 (Postpaid Hourly Meter)</div>
       <ol class="contract-clauses">
         <li><strong>กรรมสิทธิ์และการติดตั้งเครื่องที่บ้าน:</strong> เครื่องเกมคอนโซล อุปกรณ์เสริม และสมาร์ทบอร์ด <strong>ESP32</strong> ที่นำไปติดตั้ง ณ ที่พักอาศัยของผู้เช่า ถือเป็นกรรมสิทธิ์ของ <strong>ร้าน TakeIT Gaming &amp; Console</strong> ตลอดอายุสัญญา โดยผู้เช่าได้ชำระค่าบริการติดตั้งเครื่องเริ่มต้นจำนวน <strong>${formatTHB(computedInstallTotal)}</strong> เรียบร้อยแล้ว</li>
-        <li><strong>การนับชั่วโมงใช้งานจริงแบบ Real-time และการชำระเงินแบบ Postpaid:</strong> คู่สัญญาตกลงให้ใช้ข้อมูลเวลาเปิดใช้งานเครื่องจากสมาร์ทบอร์ด <strong>ESP32</strong> ที่เชื่อมต่อกับตัวเครื่องคอนโซลเป็นเกณฑ์ในการคำนวณค่าเช่ารายชั่วโมงตามอัตราที่ระบุไว้ในตารางข้อที่ 1 โดยผู้เช่าสามารถตรวจสอบชั่วโมงใช้งานและยอดเงินสะสมของเครื่องตนเองได้แบบเรียลไทม์ผ่านเว็บไซต์ของร้าน และตกลงชำระค่าบริการรายชั่วโมงตามจำนวนชั่วโมงที่ใช้งานจริงเมื่อครบรอบบิลหรือเมื่อสิ้นสุดการเช่า</li>
-        <li><strong style="color:#b91c1c;">เงื่อนไขกรณีหยุดใช้งานเครื่องติดต่อกันเกิน 2 วัน (48 ชั่วโมง):</strong> <strong>หากลูกค้านำเครื่องไปใช้เช่ารายชั่วโมงแล้วหยุดใช้เครื่องเป็นเวลาเกิน 2 วัน (48 ชั่วโมง) ทางร้านขอติดต่อนำเครื่องคืนเพื่อไม่ให้เสียโอกาสของลูกค้าคนอื่นที่รอเครื่อง</strong> โดยอ้างอิงจากเวลาเปิดใช้งานล่าสุด (Last Active) ที่บันทึกในระบบสมาร์ทบอร์ด ESP32 และผู้เช่าตกลงให้ความร่วมมือในการส่งมอบเครื่องคืนพร้อมชำระค่าบริการรายชั่วโมงสะสมตามจริง</li>
+        <li><strong>การนับชั่วโมงใช้งานจริงแบบ Real-time และการชำระเงินรายวัน (Postpaid Daily Billing):</strong> คู่สัญญาตกลงให้ใช้ข้อมูลเวลาเปิดใช้งานเครื่องจากสมาร์ทบอร์ด <strong>ESP32</strong> ที่เชื่อมต่อกับตัวเครื่องคอนโซลเป็นเกณฑ์ในการคำนวณค่าเช่ารายชั่วโมงตามอัตราที่ระบุไว้ในตารางข้อที่ 1 โดยผู้เช่าสามารถตรวจสอบชั่วโมงใช้งานและยอดเงินสะสมของเครื่องตนเองได้แบบเรียลไทม์ผ่านเว็บไซต์ของร้าน และตกลงชำระค่าบริการรายชั่วโมง<strong>แบบวันต่อวัน โดยทางร้านจะติดต่อไปเก็บค่าบริการจากผู้เช่าในช่วงเวลาประมาณ 20.00 น. ของทุกวัน</strong> (หรือเมื่อสิ้นสุดการเช่า) ตามจำนวนชั่วโมงและนาทีที่ใช้งานจริงในรอบวันนั้นๆ</li>
+        <li><strong>การแจ้งขอคืนเครื่องคอนโซลโดยลูกค้า:</strong> <strong>หากลูกค้ามีความประสงค์จะขอคืนเครื่องคอนโซล ให้ติดต่อแจ้งมายังทางร้านผ่านเบอร์โทรศัพท์ <span style="color:#0284c7;">0826716780</span></strong> เพื่อนัดหมายวัน-เวลาในการเข้ารับเครื่องคืนและสรุปยอดค่าบริการรายชั่วโมงสะสมตามจริง</li>
+        <li><strong style="color:#b91c1c;">เงื่อนไขกรณีทางร้านขอคืนเครื่องคอนโซล (แจ้งเหตุผลล่วงหน้าและรับคืนที่บ้านฟรี):</strong> <strong>หากทางร้านมีความจำเป็นต้องขอคืนเครื่องคอนโซล ผู้เช่าจะต้องส่งมอบเครื่องคืนให้แก่ทางร้าน โดยทางร้านจะเดินทางไปรับเครื่องคืนถึงบ้านลูกค้าโดยไม่เสียค่าบริการใดๆ ทั้งสิ้น</strong> ทั้งนี้ การขอคืนเครื่องจะมีเหตุผลอันสมควร โดย<strong>ทางร้านจะติดต่อหาลูกค้าเพื่อแจ้งให้ทราบล่วงหน้าว่าจะขอคืนตัวคอนโซล พร้อมอธิบายเหตุผลให้ลูกค้าทราบอย่างชัดเจน</strong> รวมถึงกรณีที่ลูกค้านำเครื่องไปใช้เช่ารายชั่วโมงแล้วหยุดใช้เครื่องติดต่อกันเป็นเวลาเกิน 2 วัน (48 ชั่วโมง) ทางร้านขอติดต่อนำเครื่องคืนเพื่อไม่ให้เสียโอกาสของลูกค้าคนอื่นที่รอเครื่อง โดยอ้างอิงจากเวลาเปิดใช้งานล่าสุด (Last Active) ในระบบสมาร์ทบอร์ด ESP32 และผู้เช่าตกลงให้ความร่วมมือในการส่งมอบเครื่องคืนพร้อมชำระค่าบริการรายชั่วโมงสะสมตามจริง</li>
         <li><strong>การห้ามดัดแปลงหรือถอดอุปกรณ์วัดเวลา (ESP32 Tamper Policy):</strong> ผู้เช่าตกลงจะไม่แกะ ถอด ดัดแปลง หรือรบกวนการทำงานของบอร์ด ESP32 และสายสัญญาณที่เชื่อมต่อกับเครื่องคอนโซล รวมถึงดูแลรักษาเครื่องคอนโซลให้อยู่ในสภาพปกติ</li>
       </ol>
     `
@@ -4270,6 +4408,7 @@ function buildOrderContractHtml(order, options = { unmasked: true, isDraft: fals
           <div><strong>ชื่อร้านค้า:</strong> ร้าน TakeIT Gaming &amp; Console</div>
           <div><strong>ผู้แทน / บัญชีรับชำระ:</strong> ${escapeXml(state.settings.bankInfo || DEFAULT_SETTINGS.bankInfo)}</div>
           <div><strong>อ้างอิงการรับชำระ:</strong> ${escapeXml(state.settings.promptPayId || DEFAULT_SETTINGS.promptPayId)}</div>
+          <div><strong>เบอร์โทรติดต่อ / แจ้งคืนเครื่อง:</strong> 0826716780</div>
           <div><strong>เว็บไซต์ทางการ:</strong> https://vidergroup124.github.io/takeit/</div>
         </div>
 
@@ -4370,6 +4509,7 @@ function buildOrderContractPlainText(order, unmasked = true) {
     `เลขที่สัญญา: ${meta.contractNo}`,
     `อ้างอิงรหัสคำสั่งซื้อ: ${order?.id || 'DRAFT'}`,
     `วันที่ทำสัญญา: ${order?.createdAtFormatted || new Date().toLocaleString('th-TH')}`,
+    `ผู้ให้เช่า/ร้านค้า: ร้าน TakeIT Gaming & Console (โทรติดต่อ/แจ้งคืนเครื่อง: 0826716780)`,
     `ผู้เช่า/ผู้ซื้อ: ${custName} (โทร: ${custPhone})`,
     `ที่อยู่จัดส่ง: ${custAddress}`,
     `------------------------------------------------`,
@@ -4384,7 +4524,9 @@ function buildOrderContractPlainText(order, unmasked = true) {
     `รวมยอดชำระสุทธิทั้งสิ้น: ${formatTHB(order?.grandTotal || 0)}`,
     `------------------------------------------------`,
     ...(meta.hasHomeInstall ? [
-      `เงื่อนไขการเช่าเครื่องติดบ้านรายชั่วโมง (ESP32): คิดค่ารายชั่วโมงตามเวลาเปิดเครื่องจริงแบบ Postpaid ทั้งนี้ หากลูกค้านำเครื่องไปใช้เช่ารายชั่วโมงแล้วหยุดใช้เครื่องเป็นเวลาเกิน 2 วัน (48 ชั่วโมง) ทางร้านขอติดต่อนำเครื่องคืนเพื่อไม่ให้เสียโอกาสของลูกค้าคนอื่นที่รอเครื่อง`
+      `เงื่อนไขการเช่าเครื่องติดบ้านรายชั่วโมง (ESP32): คิดค่ารายชั่วโมงตามเวลาเปิดเครื่องจริงแบบวันต่อวัน (Postpaid) โดยทางร้านจะติดต่อไปแจ้งยอดและเก็บค่าเช่ารายชั่วโมงในช่วงเวลาประมาณ 20.00 น. ของทุกวัน`,
+      `- การขอคืนเครื่องโดยลูกค้า: หากลูกค้าต้องการขอคืนเครื่องคอนโซล ให้ติดต่อมาทางเบอร์โทรศัพท์ 0826716780`,
+      `- การขอคืนเครื่องโดยทางร้าน: หากทางร้านขอคืนเครื่อง ลูกค้าจะต้องคืนเครื่องให้แก่ทางร้าน โดยทางร้านจะเดินทางไปรับคืนที่บ้านลูกค้าโดยไม่เสียค่าบริการใดๆ ทั้งนี้ การขอคืนเครื่องจะมีเหตุผล โดยทางร้านจะติดต่อแจ้งลูกค้าล่วงหน้าพร้อมอธิบายเหตุผลให้ทราบอย่างชัดเจน (รวมถึงกรณีหยุดใช้งานเครื่องเกิน 2 วัน หรือ 48 ชั่วโมง ทางร้านขอติดต่อนำเครื่องคืนเพื่อไม่ให้เสียโอกาสของลูกค้าท่านอื่นที่รอเครื่อง)`
     ] : []),
     `เงื่อนไขสำคัญ: ทางร้านออกค่าส่งแผ่นขากลับให้ฟรี และโอนคืนเงินมัดจำเต็มจำนวน 100% ภายใน 24 ชม. หลังได้รับแผ่นคืนในสภาพปกติ`,
     `ลงชื่ออิเล็กทรอนิกส์ผู้เช่า/ผู้ซื้อ: ${custName}`,
@@ -5528,7 +5670,9 @@ function renderEsp32LiveMeterResults(rawQuery = '') {
               ? `🕹️ รอบการเล่นล่าสุด (Session): <strong>${escapeXml(s.current_session)}</strong> • เล่นรอบนี้แล้ว <strong>${Number(s.session_minutes || 0)} นาที</strong>`
               : `📡 บอร์ด ESP32 (${escapeXml(s.deviceId)}) ส่งข้อมูลทุก 1 นาทีเข้า Firebase เว็บเราโดยตรง`
             }
+            <br><span style="color:#6ee7b7; font-size:0.75rem;">🕗 รอบเก็บค่าเช่ารายชั่วโมง: เก็บแบบวันต่อวัน โดยทางร้านจะติดต่อหาลูกค้าช่วงเวลา <strong>20.00 น.</strong> ของทุกวัน</span>
             <br><span style="color:#fcd34d; font-size:0.75rem;">⚠️ เงื่อนไขสัญญา: หากหยุดใช้เครื่องติดต่อกันเกิน 2 วัน ทางร้านขอติดต่อนำเครื่องคืนเพื่อให้คิวลูกค้าท่านอื่น</span>
+            <br><span style="color:#7dd3fc; font-size:0.75rem;">📞 หากลูกค้าต้องการขอคืนเครื่อง ติดต่อโทร <strong>0826716780</strong> (กรณีทางร้านขอคืน ทางร้านจะติดต่อแจ้งเหตุผลล่วงหน้า และไปรับคืนถึงบ้านฟรีไม่มีค่าบริการ)</span>
           </span>
           <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
             <button type="button" class="btn btn-outline btn-sm" data-esp32-session-contract="${escapeXml(s.id)}" data-unmasked="${isOwnerOrAdmin ? 'true' : 'false'}">
