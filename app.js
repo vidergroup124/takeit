@@ -5479,11 +5479,11 @@ function normalizeEsp32SessionRecord(raw, docId = '') {
     baseSeconds = Math.round(Number(raw.total_hours ?? raw.usageHours ?? raw.hours ?? 0) * 3600);
   }
 
-  // Heartbeat detection from ESP32's last_timestamp (3s for RTDB firmware, 15s/60s for Firestore firmware)
+  // Heartbeat detection from ESP32's last_timestamp (3s/5s for RTDB firmware, 15s/60s for Firestore firmware)
   const heartbeatIntervalSec = Math.max(2, Number(raw.heartbeat_interval || 60));
-  const offlineTimeoutSec = heartbeatIntervalSec <= 5
-    ? Math.max(10, heartbeatIntervalSec + 7)
-    : Math.max(25, heartbeatIntervalSec + 12);
+  const offlineTimeoutSec = heartbeatIntervalSec <= 10
+    ? Math.max(18, heartbeatIntervalSec * 3)
+    : Math.max(28, heartbeatIntervalSec + 15);
   const espEpochSec = Number(raw.last_timestamp || 0);
 
   if (espEpochSec > 1700000000) {

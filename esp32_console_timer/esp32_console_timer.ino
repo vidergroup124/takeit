@@ -26,8 +26,9 @@ const long  gmtOffset_sec = 7 * 3600; // เวลาประเทศไทย
 const int   daylightOffset_sec = 0;
 
 unsigned long lastUpdate = 0;
-const unsigned long updateInterval = 3000; // ส่งข้อมูลสดเข้า Realtime Database ทุกๆ 3 วินาที!
-const int heartbeatIntervalSec = 3;
+const unsigned long updateInterval = 5000; // ส่งข้อมูลสดเข้า Realtime Database ทุกๆ 5 วินาที (เสถียรสูง ไม่หลุดง่าย)
+const int heartbeatIntervalSec = 5;
+unsigned long wifiLostSinceMs = 0;
 
 String sessionID = "";
 String sessionStartStr = "";
@@ -129,16 +130,31 @@ bool fetchCloudTotalSeconds(unsigned long& outSecs) {
   return false;
 }
 
-// ฟังก์ชันส่งข้อมูลอัปเดตเข้า Firebase Realtime Database ของเว็บ TakeIT (อัปเดตสดทุกๆ 3 วินาที)
+// ฟังก์ชันส่งข้อมูลอัปเดตเข้า Firebase Realtime Database ของเว็บ TakeIT (อัปเดตสดทุกๆ 5 วินาที + ต่อ Wi-Fi อัตโนมัติเมื่อหลุด)
 void updateFirebase(bool isInitialBoot, unsigned long deltaSeconds = 0) {
-  if (WiFi.status() != WL_CONNECTED) return;
+  if (WiFi.status() != WL_CONNECTED) {
+    if (wifiLostSinceMs == 0) wifiLostSinceMs = millis();
+    Serial.println("[WiFi Lost] Attempting WiFi.reconnect()...");
+    WiFi.reconnect();
+    delay(2000);
+    if (WiFi.status() != WL_CONNECTED) {
+      if (millis() - wifiLostSinceMs > 45000) {
+        Serial.println("[WiFi Lost > 45s] Restarting ESP32 cleanly...");
+        ESP.restart();
+      }
+      return;
+    }
+  }
+  wifiLostSinceMs = 0;
 
-  // เช็กยอดสะสมล่าสุดจาก RTDB ทุกครั้งก่อนบวกเพิ่ม เพื่อให้รับรู้ทันทีหากแอดมินกดรีเซ็ตเป็น 0 บนหน้าเว็บ
+  // เช็กยอดสะสมล่าสุดจาก RTDB ตอนเปิดเครื่องและทุกๆ 15 วินาที (3 รอบ x 5 วิ) เพื่อลดภาระ TLS และไม่หลุดง่าย
   unsigned long totalSeconds = lastSyncedTotalSeconds;
-  unsigned long cloudSecs = 0;
-  if (fetchCloudTotalSeconds(cloudSecs)) {
-    hasSyncedCloudBaseline = true;
-    totalSeconds = cloudSecs;
+  if (!hasSyncedCloudBaseline || isInitialBoot || (syncCounter % 3 == 0)) {
+    unsigned long cloudSecs = 0;
+    if (fetchCloudTotalSeconds(cloudSecs)) {
+      hasSyncedCloudBaseline = true;
+      totalSeconds = cloudSecs;
+    }
   }
 
   if (!isInitialBoot) {
@@ -196,9 +212,9 @@ void updateFirebase(bool isInitialBoot, unsigned long deltaSeconds = 0) {
     http1.end();
   }
 
-  // บันทึกประวัติการเล่นรายรอบ (Session History) ตอนเปิดเครื่องและทุกๆ 1 นาที (20 รอบ x 3 วิ)
+  // บันทึกประวัติการเล่นรายรอบ (Session History) ตอนเปิดเครื่องและทุกๆ 1 นาที (12 รอบ x 5 วิ)
   int httpCode2 = 200;
-  if (isInitialBoot || (syncCounter % 20 == 0)) {
+  if (isInitialBoot || (syncCounter % 12 == 0)) {
     String sessionUrl = FIREBASE_RTDB_URL + "/ps4_tracker/" + CONSOLE_ID + "/sessions/" + sessionID + ".json";
     String sessionBody = "{";
     sessionBody += "\"start_time\":\"" + sessionStartStr + "\",";
@@ -219,13 +235,20 @@ void updateFirebase(bool isInitialBoot, unsigned long deltaSeconds = 0) {
 
   // ไฟสีฟ้ากะพริบ 1 ครั้งเมื่อส่งข้อมูลสำเร็จ
   if (httpCode1 == 200 && httpCode2 == 200) {
-    Serial.printf("[TakeIT Firebase Updated] Console: %s | Total: %lu secs (%lu mins, %.2f hrs)\n",
-                  CONSOLE_ID.c_str(), totalSeconds, totalMinutes, totalHours);
+    Serial.printf("[TakeIT RTDB Updated] Console: %s | Total: %lu secs (%lu mins, %.2f hrs) | Heap: %u\n",
+                  CONSOLE_ID.c_str(), totalSeconds, totalMinutes, totalHours, ESP.getFreeHeap());
     digitalWrite(LED_PIN, HIGH);
     delay(150);
     digitalWrite(LED_PIN, LOW);
   } else {
-    Serial.printf("[Firebase Error] Code: %d, %d\n", httpCode1, httpCode2);
+    Serial.printf("[Firebase Error] Code: %d, %d | Heap: %u\n", httpCode1, httpCode2, ESP.getFreeHeap());
+  }
+
+  // ป้องกันบอร์ดค้างระยะยาวหากหน่วยความจำเหลือน้อยกว่า 30KB ให้รีบูตตัวเองอย่างปลอดภัย (ยอดเวลาถูกเซฟไว้แล้ว)
+  if (ESP.getFreeHeap() < 30000) {
+    Serial.println("[Low Heap Safety] Restarting ESP32 cleanly...");
+    delay(200);
+    ESP.restart();
   }
 }
 
@@ -243,6 +266,8 @@ void setup() {
     delay(3000);
     ESP.restart();
   }
+  WiFi.setAutoReconnect(true);
+  WiFi.persistent(true);
   Serial.println("WiFi Connected!");
 
   // ซิงค์เวลา NTP
