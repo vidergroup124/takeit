@@ -5424,7 +5424,7 @@ function normalizeEsp32SessionRecord(raw, docId = '') {
 
   if (espEpochSec > 1700000000) {
     const prevSync = esp32ClientSyncTracker.get(deviceId);
-    if (!prevSync || prevSync.espEpochSec !== espEpochSec || prevSync.baseSeconds !== baseSeconds) {
+    if (!prevSync || prevSync.espEpochSec !== espEpochSec) {
       const ageMs = Math.max(0, Date.now() - (espEpochSec * 1000));
       const anchorMs = ageMs <= 15000 ? Date.now() : (espEpochSec * 1000);
       esp32ClientSyncTracker.set(deviceId, { espEpochSec, baseSeconds, anchorMs });
@@ -6157,20 +6157,30 @@ function renderAdminEsp32Sessions() {
       }
       const stats = getLiveEsp32SessionStats(target);
       const nowMs = Date.now();
+      const wasOnline = Boolean(stats.isOnline);
       target.baseAccumulatedSeconds = 0;
       target.total_seconds = 0;
       target.total_minutes = 0;
       target.total_hours = 0;
       target.session_minutes = 0;
-      target.lastStartTimeMs = stats.isOnline ? nowMs : null;
+      target.powerStatus = wasOnline ? 'online' : 'standby';
+      target.lastStartTimeMs = wasOnline ? nowMs : null;
       target.manualActionAtMs = nowMs;
       target.updatedAtMs = nowMs;
       target.lastHeartbeatFormatted = new Date(nowMs).toLocaleString('th-TH');
-      esp32ClientSyncTracker.set(target.deviceId || target.id, {
-        espEpochSec: Number(target.last_timestamp || 0),
-        baseSeconds: 0,
-        anchorMs: nowMs
-      });
+      const trackerKey = target.deviceId || target.id;
+      if (wasOnline) {
+        esp32ClientSyncTracker.set(trackerKey, {
+          espEpochSec: Number(target.last_timestamp || 0),
+          baseSeconds: 0,
+          anchorMs: nowMs
+        });
+      } else {
+        esp32ClientSyncTracker.delete(trackerKey);
+        if (target.last_timestamp) {
+          target.manualStandbyAtSec = Number(target.last_timestamp);
+        }
+      }
       saveStateLocally();
       await saveEsp32SessionToCloud(target);
       refreshEsp32ViewsIfOpen();
