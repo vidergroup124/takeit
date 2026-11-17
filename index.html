@@ -58,13 +58,22 @@
   <!-- Header -->
   <header class="site-header">
     <div class="header-inner">
-      <a href="#" class="brand" aria-label="TakeIT หน้าแรก">
-        <div class="brand-logo" aria-hidden="true">🎮</div>
-        <div class="brand-text">
-          <span class="brand-name">TakeIT Gaming &amp; Console</span>
-          <span class="brand-tagline">Console Hardware • Buy &amp; Daily Game Disc Rental • Gamer IT Store</span>
+      <div class="header-top-bar">
+        <a href="#" class="brand" aria-label="TakeIT หน้าแรก">
+          <div class="brand-logo" aria-hidden="true">🎮</div>
+          <div class="brand-text">
+            <span class="brand-name">TakeIT Gaming &amp; Console</span>
+            <span class="brand-tagline">Console Hardware • Buy &amp; Daily Game Disc Rental • Gamer IT Store</span>
+          </div>
+        </a>
+
+        <div class="header-cart-corner">
+          <button type="button" class="btn btn-primary cart-btn" id="btn-open-cart">
+            🛒 ตะกร้าสินค้า
+            <span class="cart-count" id="cart-count-badge">0</span>
+          </button>
         </div>
-      </a>
+      </div>
 
       <div class="header-actions">
         <span id="db-status-pill" class="sync-pill" title="สถานะการเชื่อมต่อฐานข้อมูล">
@@ -103,11 +112,6 @@
         <button type="button" class="btn btn-outline btn-sm" id="btn-open-support"
           title="แจ้งปัญหาการใช้งาน หรือขอสินค้าที่ร้านไม่มี">
           📢 แจ้งปัญหา / ขอสินค้า
-        </button>
-
-        <button type="button" class="btn btn-primary cart-btn" id="btn-open-cart">
-          🛒 ตะกร้าสินค้า
-          <span class="cart-count" id="cart-count-badge">0</span>
         </button>
 
         <button type="button" class="btn btn-outline btn-sm" id="btn-admin-toggle">

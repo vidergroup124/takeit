@@ -364,12 +364,33 @@ table.data-table tbody tr:hover th {
 .header-inner {
   max-inline-size: 1320px;
   margin-inline: auto;
-  padding: 0.85rem 1.25rem;
+  padding: 0.75rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.65rem;
+}
+
+.header-top-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  flex-wrap: wrap;
+  inline-size: 100%;
+}
+
+.header-cart-corner {
+  margin-inline-start: auto;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.header-cart-corner .cart-btn {
+  padding: 0.52rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  box-shadow: 0 4px 16px rgba(56, 189, 248, 0.28);
 }
 
 .brand {
@@ -1650,6 +1671,11 @@ table.data-table tbody tr:hover th {
 
   .brand-tagline {
     display: none;
+  }
+
+  .header-cart-corner .cart-btn {
+    padding: 0.36rem 0.68rem;
+    font-size: 0.78rem;
   }
 
   .header-actions {
