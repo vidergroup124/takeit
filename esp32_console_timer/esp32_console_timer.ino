@@ -11,9 +11,10 @@
 #include <WiFiClientSecure.h>
 #include "time.h"
 
-// ================= 1. ตั้งค่าระบบ (ใช้ Firebase ตัวเดิมของเว็บ TakeIT ได้เลย) =================
-String FIREBASE_PROJECT_ID = "takeit-ebb5e";
-String FIREBASE_API_KEY    = "AIzaSyDUAxkwmUt6WPUTj294qhPeGwpHOp3772A";
+// ================= 1. ตั้งค่าระบบ (ใช้ Firebase Realtime Database ของเว็บ TakeIT) =================
+// หากตอนสร้าง Realtime Database เลือกเซิร์ฟเวอร์ Singapore ให้ใช้ .asia-southeast1.firebasedatabase.app
+// (หากเลือก United States ให้เปลี่ยนเป็น https://takeit-ebb5e-default-rtdb.firebaseio.com)
+String FIREBASE_RTDB_URL   = "https://takeit-ebb5e-default-rtdb.asia-southeast1.firebasedatabase.app";
 String CONSOLE_ID          = "PS4_01"; // ตั้งชื่อรหัสเครื่อง (เช่น PS4_01, PS4_02, PS5_01, NSW_01)
 // ============================================================================================
 
@@ -25,8 +26,8 @@ const long  gmtOffset_sec = 7 * 3600; // เวลาประเทศไทย
 const int   daylightOffset_sec = 0;
 
 unsigned long lastUpdate = 0;
-const unsigned long updateInterval = 15000; // ส่งข้อมูลทุกๆ 15 วินาที (แม่นยำระดับวินาทีและจับตอนถอดปลั๊กได้ไว)
-const int heartbeatIntervalSec = 15;
+const unsigned long updateInterval = 3000; // ส่งข้อมูลสดเข้า Realtime Database ทุกๆ 3 วินาที!
+const int heartbeatIntervalSec = 3;
 
 String sessionID = "";
 String sessionStartStr = "";
@@ -74,59 +75,70 @@ long extractFirestoreInt(const String& payload, const char* fieldName, long fall
   return fallback;
 }
 
-// ฟังก์ชันอ่านจำนวนวินาทีสะสมเดิมจาก Firebase Firestore (คืนค่า true เมื่ออ่านสำเร็จ เพื่อป้องกันการเขียน 0 ทับยอดเดิม)
+// ฟังก์ชันอ่านจำนวนวินาทีสะสมเดิมจาก Firebase Realtime Database (คืนค่า true เมื่ออ่านสำเร็จ เพื่อป้องกันการเขียน 0 ทับยอดเดิม)
 bool fetchCloudTotalSeconds(unsigned long& outSecs) {
   for (int attempt = 0; attempt < 2; attempt++) {
     WiFiClientSecure client;
     client.setInsecure();
     HTTPClient http;
-    http.setTimeout(15000);
+    http.setTimeout(10000);
 
-    String url = "https://firestore.googleapis.com/v1/projects/" + FIREBASE_PROJECT_ID +
-                 "/databases/(default)/documents/ps4_tracker/" + CONSOLE_ID +
-                 "?key=" + FIREBASE_API_KEY;
+    String secUrl = FIREBASE_RTDB_URL + "/ps4_tracker/" + CONSOLE_ID + "/total_seconds.json";
+    http.begin(client, secUrl);
+    int code = http.GET();
 
-    http.begin(client, url);
-    int httpResponseCode = http.GET();
-
-    if (httpResponseCode == 200) {
+    if (code == 200) {
       String payload = http.getString();
+      payload.trim();
       http.end();
-      long secsVal = extractFirestoreInt(payload, "total_seconds", -1);
-      long minsVal = extractFirestoreInt(payload, "total_minutes", 0);
-      if (minsVal < 0) minsVal = 0;
-      if (secsVal >= 0 && (secsVal / 60) == minsVal) {
-        outSecs = (unsigned long)secsVal;
-      } else {
-        outSecs = (unsigned long)minsVal * 60UL;
+      if (payload != "null" && payload.length() > 0) {
+        long val = payload.toInt();
+        outSecs = val > 0 ? (unsigned long)val : 0;
+        return true;
       }
-      return true;
-    } else if (httpResponseCode == 404) {
-      http.end();
+
+      // ถ้ายังไม่มี total_seconds ใน RTDB ให้ลองเช็ก total_minutes แทน
+      WiFiClientSecure clientMin;
+      clientMin.setInsecure();
+      HTTPClient httpMin;
+      httpMin.setTimeout(10000);
+      httpMin.begin(clientMin, FIREBASE_RTDB_URL + "/ps4_tracker/" + CONSOLE_ID + "/total_minutes.json");
+      int minCode = httpMin.GET();
+      if (minCode == 200) {
+        String minPayload = httpMin.getString();
+        minPayload.trim();
+        httpMin.end();
+        if (minPayload != "null" && minPayload.length() > 0) {
+          long m = minPayload.toInt();
+          outSecs = m > 0 ? (unsigned long)m * 60UL : 0;
+        } else {
+          outSecs = 0;
+        }
+        return true;
+      }
+      httpMin.end();
       outSecs = 0;
       return true;
     } else {
-      Serial.printf("[Firebase GET Warning attempt %d] Code: %d (%s)\n",
-                    attempt + 1, httpResponseCode, http.errorToString(httpResponseCode).c_str());
+      Serial.printf("[RTDB GET Warning attempt %d] Code: %d (%s)\n",
+                    attempt + 1, code, http.errorToString(code).c_str());
       http.end();
-      delay(600);
+      delay(400);
     }
   }
   return false;
 }
 
-// ฟังก์ชันส่งข้อมูลอัปเดตเข้า Firebase ตัวเดิมของเว็บ TakeIT (อัปเดตหน้าเว็บแบบ Real-time ทันที)
+// ฟังก์ชันส่งข้อมูลอัปเดตเข้า Firebase Realtime Database ของเว็บ TakeIT (อัปเดตสดทุกๆ 3 วินาที)
 void updateFirebase(bool isInitialBoot, unsigned long deltaSeconds = 0) {
   if (WiFi.status() != WL_CONNECTED) return;
 
-  // เช็กยอดสะสมจาก Cloud ตอนเปิดเครื่อง (หรือยังไม่เคยซิงค์ฐานเวลา) และทุกๆ 1 นาที
+  // เช็กยอดสะสมล่าสุดจาก RTDB ทุกครั้งก่อนบวกเพิ่ม เพื่อให้รับรู้ทันทีหากแอดมินกดรีเซ็ตเป็น 0 บนหน้าเว็บ
   unsigned long totalSeconds = lastSyncedTotalSeconds;
-  if (!hasSyncedCloudBaseline || isInitialBoot || (syncCounter % 4 == 0)) {
-    unsigned long cloudSecs = 0;
-    if (fetchCloudTotalSeconds(cloudSecs)) {
-      hasSyncedCloudBaseline = true;
-      totalSeconds = cloudSecs;
-    }
+  unsigned long cloudSecs = 0;
+  if (fetchCloudTotalSeconds(cloudSecs)) {
+    hasSyncedCloudBaseline = true;
+    totalSeconds = cloudSecs;
   }
 
   if (!isInitialBoot) {
@@ -150,78 +162,54 @@ void updateFirebase(bool isInitialBoot, unsigned long deltaSeconds = 0) {
     currentTimeStr = getFormattedTime("%d/%m/%Y %H:%M:%S");
   }
 
-  // อัปเดตเฉพาะฟิลด์เวลาของบอร์ด โดยไม่ทับข้อมูลชื่อลูกค้าหรือเรทราคาที่แอดมินตั้งไว้บนเว็บ
-  // หากยังอ่านยอดเดิมจาก Cloud ไม่ได้ ห้ามส่ง total_seconds/total_minutes ทับเด็ดขาด!
-  String updateMask = "updateMask.fieldPaths=console_name"
-                      "&updateMask.fieldPaths=deviceId"
-                      "&updateMask.fieldPaths=heartbeat_interval"
-                      "&updateMask.fieldPaths=last_active"
-                      "&updateMask.fieldPaths=last_timestamp"
-                      "&updateMask.fieldPaths=current_session"
-                      "&updateMask.fieldPaths=session_start"
-                      "&updateMask.fieldPaths=powerStatus";
-  if (hasSyncedCloudBaseline) {
-    updateMask += "&updateMask.fieldPaths=total_seconds"
-                  "&updateMask.fieldPaths=total_minutes"
-                  "&updateMask.fieldPaths=total_hours"
-                  "&updateMask.fieldPaths=session_minutes";
-  }
-
-  String firestoreUrl = "https://firestore.googleapis.com/v1/projects/" + FIREBASE_PROJECT_ID +
-                        "/databases/(default)/documents/ps4_tracker/" + CONSOLE_ID +
-                        "?" + updateMask + "&key=" + FIREBASE_API_KEY;
+  String rtdbUrl = FIREBASE_RTDB_URL + "/ps4_tracker/" + CONSOLE_ID + ".json";
 
   String body = "{";
-  body += "\"fields\":{";
-  body += "\"console_name\":{\"stringValue\":\"" + CONSOLE_ID + "\"},";
-  body += "\"deviceId\":{\"stringValue\":\"" + CONSOLE_ID + "\"},";
-  body += "\"heartbeat_interval\":{\"integerValue\":\"" + String(heartbeatIntervalSec) + "\"},";
+  body += "\"console_name\":\"" + CONSOLE_ID + "\",";
+  body += "\"deviceId\":\"" + CONSOLE_ID + "\",";
+  body += "\"heartbeat_interval\":" + String(heartbeatIntervalSec) + ",";
   if (hasSyncedCloudBaseline) {
-    body += "\"total_seconds\":{\"integerValue\":\"" + String(totalSeconds) + "\"},";
-    body += "\"total_minutes\":{\"integerValue\":\"" + String(totalMinutes) + "\"},";
-    body += "\"total_hours\":{\"doubleValue\":" + String(totalHours, 2) + "},";
-    body += "\"session_minutes\":{\"integerValue\":\"" + String(sessionMinutes) + "\"},";
+    body += "\"total_seconds\":" + String(totalSeconds) + ",";
+    body += "\"total_minutes\":" + String(totalMinutes) + ",";
+    body += "\"total_hours\":" + String(totalHours, 2) + ",";
+    body += "\"session_minutes\":" + String(sessionMinutes) + ",";
   }
-  body += "\"last_active\":{\"stringValue\":\"" + currentTimeStr + "\"},";
-  body += "\"last_timestamp\":{\"integerValue\":\"" + String(currentEpoch) + "\"},";
-  body += "\"current_session\":{\"stringValue\":\"" + sessionID + "\"},";
-  body += "\"session_start\":{\"stringValue\":\"" + sessionStartStr + "\"},";
-  body += "\"powerStatus\":{\"stringValue\":\"online\"}";
-  body += "}}";
+  body += "\"last_active\":\"" + currentTimeStr + "\",";
+  body += "\"last_timestamp\":" + String(currentEpoch) + ",";
+  body += "\"current_session\":\"" + sessionID + "\",";
+  body += "\"session_start\":\"" + sessionStartStr + "\",";
+  body += "\"powerStatus\":\"online\"";
+  body += "}";
 
   int httpCode1 = -1;
   {
     WiFiClientSecure client1;
     client1.setInsecure();
     HTTPClient http1;
-    http1.setTimeout(15000);
-    http1.begin(client1, firestoreUrl);
+    http1.setTimeout(10000);
+    http1.begin(client1, rtdbUrl);
     http1.addHeader("Content-Type", "application/json");
     httpCode1 = http1.PATCH(body);
     if (httpCode1 <= 0) {
-      Serial.printf("[Firebase PATCH1 Error] Code: %d (%s)\n", httpCode1, http1.errorToString(httpCode1).c_str());
+      Serial.printf("[RTDB PATCH Error] Code: %d (%s)\n", httpCode1, http1.errorToString(httpCode1).c_str());
     }
     http1.end();
   }
 
-  // บันทึกประวัติการเล่นรายรอบ (Session History) ตอนเปิดเครื่องและทุกๆ 1 นาทีเพื่อประหยัดโควต้า Write
+  // บันทึกประวัติการเล่นรายรอบ (Session History) ตอนเปิดเครื่องและทุกๆ 1 นาที (20 รอบ x 3 วิ)
   int httpCode2 = 200;
-  if (isInitialBoot || (syncCounter % 4 == 0)) {
-    String sessionUrl = "https://firestore.googleapis.com/v1/projects/" + FIREBASE_PROJECT_ID +
-                        "/databases/(default)/documents/ps4_tracker/" + CONSOLE_ID +
-                        "/sessions/" + sessionID + "?key=" + FIREBASE_API_KEY;
-
+  if (isInitialBoot || (syncCounter % 20 == 0)) {
+    String sessionUrl = FIREBASE_RTDB_URL + "/ps4_tracker/" + CONSOLE_ID + "/sessions/" + sessionID + ".json";
     String sessionBody = "{";
-    sessionBody += "\"fields\":{";
-    sessionBody += "\"start_time\":{\"stringValue\":\"" + sessionStartStr + "\"},";
-    sessionBody += "\"last_seen\":{\"stringValue\":\"" + currentTimeStr + "\"},";
-    sessionBody += "\"duration_minutes\":{\"integerValue\":\"" + String(sessionMinutes) + "\"}";
-    sessionBody += "}}";
+    sessionBody += "\"start_time\":\"" + sessionStartStr + "\",";
+    sessionBody += "\"last_seen\":\"" + currentTimeStr + "\",";
+    sessionBody += "\"duration_minutes\":" + String(sessionMinutes);
+    sessionBody += "}";
 
     WiFiClientSecure client2;
     client2.setInsecure();
     HTTPClient http2;
-    http2.setTimeout(15000);
+    http2.setTimeout(10000);
     http2.begin(client2, sessionUrl);
     http2.addHeader("Content-Type", "application/json");
     httpCode2 = http2.PATCH(sessionBody);

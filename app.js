@@ -61,6 +61,7 @@ const DEFAULT_SETTINGS = {
   qrImageUrl: 'payment-qr.jpg',
   shippingFee: 60,
   cloudProvider: 'firebase', // Default to Firebase Cloud so all devices see the same products automatically
+  rtdbUrl: 'https://takeit-ebb5e-default-rtdb.asia-southeast1.firebasedatabase.app',
   firebaseConfigJson: JSON.stringify({
     apiKey: "AIzaSyDUAxkwmUt6WPUTj294qhPeGwpHOp3772A",
     authDomain: "takeit-ebb5e.firebaseapp.com",
@@ -342,6 +343,8 @@ let state = {
   editingProductImages: [],
   firestoreDb: null,
   firebaseModules: null,
+  rtdb: null,
+  rtdbModules: null,
   auth: null,
   authModules: null,
   currentUser: null,
@@ -610,6 +613,7 @@ async function loadInitialData() {
           ? parsed.sheetWebhookUrl
           : DEFAULT_SETTINGS.sheetWebhookUrl,
         cloudProvider: parsed.cloudProvider || 'firebase',
+        rtdbUrl: parsed.rtdbUrl || DEFAULT_SETTINGS.rtdbUrl,
         firebaseConfigJson: parsed.firebaseConfigJson || DEFAULT_SETTINGS.firebaseConfigJson
       };
     } else {
@@ -810,15 +814,30 @@ async function initCloudConnection() {
     try {
       const firebaseConfig = parseFirebaseConfig(state.settings.firebaseConfigJson);
 
-      // Dynamically load Modular Firebase SDK v10 (App, Firestore, Auth)
+      // Dynamically load Modular Firebase SDK v10 (App, Firestore, Realtime Database, Auth)
       const appMod = await import('https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js');
       const fsMod = await import('https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js');
+      const rtdbMod = await import('https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js');
       const authMod = await import('https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js');
+
+      const rtdbUrl = (state.settings.rtdbUrl || firebaseConfig.databaseURL || DEFAULT_SETTINGS.rtdbUrl || '').trim().replace(/\/$/, '');
+      if (rtdbUrl && !firebaseConfig.databaseURL) {
+        firebaseConfig.databaseURL = rtdbUrl;
+      }
 
       const app = appMod.getApps().length ? appMod.getApp() : appMod.initializeApp(firebaseConfig);
       const db = fsMod.getFirestore(app);
       state.firestoreDb = db;
       state.firebaseModules = fsMod;
+
+      try {
+        if (rtdbUrl) {
+          state.rtdb = rtdbMod.getDatabase(app, rtdbUrl);
+          state.rtdbModules = rtdbMod;
+        }
+      } catch (rtdbErr) {
+        console.warn('Firebase RTDB init warning:', rtdbErr);
+      }
 
       const auth = authMod.getAuth(app);
       state.auth = auth;
@@ -1034,16 +1053,16 @@ async function initCloudConnection() {
           }
         });
 
-        const mergeEsp32CloudSnapshot = (snap) => {
+        const mergeEsp32Entries = (entries) => {
           const existingMap = new Map((state.consoleSessions || []).map((s) => [s.deviceId || s.id, s]));
           const getFreshnessMs = (rec) => {
             const eMs = Number(rec?.last_timestamp || 0) > 1700000000 ? Number(rec.last_timestamp) * 1000 : 0;
             return Math.max(eMs, Number(rec?.updatedAtMs || 0), Number(rec?.manualActionAtMs || 0));
           };
 
-          snap.forEach((d) => {
-            const rawData = d.data();
-            const devKey = String(rawData.console_name || rawData.deviceId || rawData.esp32DeviceId || d.id).trim();
+          entries.forEach(([docId, rawData]) => {
+            if (!rawData || typeof rawData !== 'object') return;
+            const devKey = String(rawData.console_name || rawData.deviceId || rawData.esp32DeviceId || docId).trim();
             const prev = existingMap.get(devKey) || {};
             const wasDeleted = Boolean(prev.isDeleted || rawData.isDeleted);
             const deletedAtMs = Math.max(Number(prev.deletedAtMs || 0), Number(rawData.deletedAtMs || 0));
@@ -1105,8 +1124,29 @@ async function initCloudConnection() {
           refreshEsp32ViewsIfOpen();
         };
 
+        const mergeEsp32CloudSnapshot = (snap) => {
+          const entries = [];
+          snap.forEach((d) => entries.push([d.id, d.data()]));
+          mergeEsp32Entries(entries);
+        };
+
         const unsubEsp32 = fsMod.onSnapshot(fsMod.collection(db, 'takeit_console_sessions'), mergeEsp32CloudSnapshot);
         const unsubPs4Tracker = fsMod.onSnapshot(fsMod.collection(db, 'ps4_tracker'), mergeEsp32CloudSnapshot);
+
+        let unsubRtdb = () => {};
+        if (state.rtdb && state.rtdbModules) {
+          try {
+            const rtdbRef = state.rtdbModules.ref(state.rtdb, 'ps4_tracker');
+            unsubRtdb = state.rtdbModules.onValue(rtdbRef, (snap) => {
+              const val = snap.val();
+              if (val && typeof val === 'object') {
+                mergeEsp32Entries(Object.entries(val));
+              }
+            });
+          } catch (rtdbListenErr) {
+            console.warn('RTDB listener warning:', rtdbListenErr);
+          }
+        }
 
         state.unsubscribeFirestore = () => {
           unsubProd();
@@ -1114,6 +1154,7 @@ async function initCloudConnection() {
           unsubSupport();
           unsubEsp32();
           unsubPs4Tracker();
+          unsubRtdb();
         };
       }
 
@@ -3133,6 +3174,8 @@ function populateSettingsForm() {
   document.getElementById('setting-bank-info').value = state.settings.bankInfo || '';
   document.getElementById('setting-shipping-fee').value = state.settings.shippingFee ?? 60;
   document.getElementById('setting-cloud-provider').value = state.settings.cloudProvider || 'local';
+  const rtdbInput = document.getElementById('setting-rtdb-url');
+  if (rtdbInput) rtdbInput.value = state.settings.rtdbUrl || DEFAULT_SETTINGS.rtdbUrl || '';
   document.getElementById('setting-firebase-json').value = state.settings.firebaseConfigJson || '';
   document.getElementById('setting-supabase-url').value = state.settings.supabaseUrl || '';
   document.getElementById('setting-supabase-key').value = state.settings.supabaseKey || '';
@@ -3862,6 +3905,7 @@ document.addEventListener('DOMContentLoaded', () => {
       qrImageUrl: state.settings.qrImageUrl || 'payment-qr.jpg',
       shippingFee: Number(document.getElementById('setting-shipping-fee').value || 0),
       cloudProvider: document.getElementById('setting-cloud-provider').value,
+      rtdbUrl: (document.getElementById('setting-rtdb-url')?.value || '').trim() || DEFAULT_SETTINGS.rtdbUrl,
       firebaseConfigJson: document.getElementById('setting-firebase-json').value.trim(),
       supabaseUrl: document.getElementById('setting-supabase-url').value.trim(),
       supabaseKey: document.getElementById('setting-supabase-key').value.trim()
@@ -5435,9 +5479,11 @@ function normalizeEsp32SessionRecord(raw, docId = '') {
     baseSeconds = Math.round(Number(raw.total_hours ?? raw.usageHours ?? raw.hours ?? 0) * 3600);
   }
 
-  // Heartbeat detection from ESP32's last_timestamp (60s for legacy firmware, or 15s for upgraded firmware)
-  const heartbeatIntervalSec = Math.max(10, Number(raw.heartbeat_interval || 60));
-  const offlineTimeoutSec = Math.max(25, heartbeatIntervalSec + 12);
+  // Heartbeat detection from ESP32's last_timestamp (3s for RTDB firmware, 15s/60s for Firestore firmware)
+  const heartbeatIntervalSec = Math.max(2, Number(raw.heartbeat_interval || 60));
+  const offlineTimeoutSec = heartbeatIntervalSec <= 5
+    ? Math.max(10, heartbeatIntervalSec + 7)
+    : Math.max(25, heartbeatIntervalSec + 12);
   const espEpochSec = Number(raw.last_timestamp || 0);
 
   if (espEpochSec > 1700000000) {
@@ -5532,12 +5578,10 @@ function normalizeEsp32SessionRecord(raw, docId = '') {
 function getLiveEsp32SessionStats(session) {
   const norm = normalizeEsp32SessionRecord(session, session?.id);
   let totalSec = Number(norm.baseAccumulatedSeconds || 0);
-  if (norm.powerStatus === 'online' && norm.lastStartTimeMs) {
+  // Show exact real-time seconds reported directly by ESP32 via RTDB; only simulate in browser when Admin clicks Simulate ON
+  if (norm.powerStatus === 'online' && norm.manualSimulatedOnline && norm.lastStartTimeMs) {
     const elapsedSec = Math.max(0, Math.floor((Date.now() - Number(norm.lastStartTimeMs)) / 1000));
-    const hasEspEpoch = Number(norm.last_timestamp || 0) > 1700000000 && !norm.manualSimulatedOnline;
-    const heartbeatInterval = Math.max(10, Number(norm.heartbeat_interval || 60));
-    // Smoothly tick second-by-second between ESP32 heartbeats (capped right before next packet)
-    totalSec += hasEspEpoch ? Math.min(heartbeatInterval - 1, elapsedSec) : elapsedSec;
+    totalSec += elapsedSec;
   }
   const hrs = Math.floor(totalSec / 3600);
   const mins = Math.floor((totalSec % 3600) / 60);
@@ -5579,6 +5623,14 @@ async function saveEsp32SessionToCloud(session) {
     total_minutes: totalMins,
     total_hours: totalHrs
   };
+  if (state.rtdb && state.rtdbModules) {
+    try {
+      const { ref, update } = state.rtdbModules;
+      await update(ref(state.rtdb, `ps4_tracker/${devId}`), payload);
+    } catch (rtdbErr) {
+      console.warn('RTDB save ESP32 session warning:', rtdbErr);
+    }
+  }
   if (state.firestoreDb && state.firebaseModules) {
     try {
       const { doc, setDoc } = state.firebaseModules;
@@ -5592,6 +5644,14 @@ async function saveEsp32SessionToCloud(session) {
 
 async function deleteEsp32SessionFromCloud(sessionId) {
   if (!sessionId) return;
+  if (state.rtdb && state.rtdbModules) {
+    try {
+      const { ref, remove } = state.rtdbModules;
+      await remove(ref(state.rtdb, `ps4_tracker/${sessionId}`));
+    } catch (rtdbErr) {
+      console.warn('RTDB delete ESP32 session warning:', rtdbErr);
+    }
+  }
   if (state.firestoreDb && state.firebaseModules) {
     try {
       const { doc, setDoc, deleteDoc } = state.firebaseModules;

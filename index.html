@@ -321,6 +321,12 @@
 
               <div id="firebase-config-fields">
                 <div class="field">
+                  <label for="setting-rtdb-url">Firebase Realtime Database URL (สำหรับมิเตอร์ ESP32 สดทุก 3 วิ)</label>
+                  <span class="hint">คัดลอกจาก Firebase Console &gt; Build &gt; Realtime Database (เช่น <code>https://takeit-ebb5e-default-rtdb.asia-southeast1.firebasedatabase.app</code>)</span>
+                  <input type="url" id="setting-rtdb-url"
+                    placeholder="https://takeit-ebb5e-default-rtdb.asia-southeast1.firebasedatabase.app">
+                </div>
+                <div class="field">
                   <label for="setting-firebase-json">Firebase Config (วาง JSON หรือออบเจ็กต์ firebaseConfig)</label>
                   <span id="fb-json-hint" class="hint">คัดลอกจาก Firebase Console &gt; Project Settings &gt; Web App
                     Config</span>
@@ -1677,7 +1683,7 @@
 
   <!-- HEIC/HEIF image decoder for Apple iPhone photos in Chrome & other browsers -->
   <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js" defer></script>
-  <script src="app.js?v=20261117-esp32-10" defer></script>
+  <script src="app.js?v=20261117-esp32-11" defer></script>
 </body>
 
 </html>
