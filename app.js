@@ -14,9 +14,10 @@ const ADMIN_CREDENTIALS = {
 
 const STORAGE_KEYS = {
   PRODUCTS: 'takeit_products_v1',
+  DELETED_PRODUCTS: 'takeit_deleted_products_v1',
   ORDERS: 'takeit_orders_v1',
   SETTINGS: 'takeit_settings_v1',
-  CART: 'takeit_cart_v1',
+  CART: 'takeit_cart_v2',
   ADMIN_SESSION: 'takeit_admin_session_v1',
   SUPPORT: 'takeit_support_v1',
   SAVED_CONTACT: 'takeit_saved_contact_v1',
@@ -325,6 +326,7 @@ const DEFAULT_PRODUCTS = [
 // Application State
 let state = {
   products: [],
+  deletedProductsMap: {},
   orders: [],
   supportTickets: [],
   consoleSessions: [],
@@ -613,11 +615,26 @@ async function loadInitialData() {
     } else {
       state.settings = { ...DEFAULT_SETTINGS };
     }
+    const savedDeletedProds = localStorage.getItem(STORAGE_KEYS.DELETED_PRODUCTS);
+    if (savedDeletedProds) {
+      try {
+        const parsedDel = JSON.parse(savedDeletedProds);
+        if (parsedDel && typeof parsedDel === 'object') {
+          state.deletedProductsMap = parsedDel;
+        }
+      } catch (e) {}
+    }
+
     const savedProducts = localStorage.getItem(STORAGE_KEYS.PRODUCTS);
     if (savedProducts) {
-      state.products = JSON.parse(savedProducts);
-      if (Array.isArray(state.products)) {
+      const parsedProds = JSON.parse(savedProducts);
+      if (Array.isArray(parsedProds)) {
         let changed = false;
+        state.products = parsedProds.filter((p) => {
+          if (!p || !p.id || p.isDeleted) return false;
+          const delMs = Number(state.deletedProductsMap[p.id] || 0);
+          return !(delMs > 0 && delMs >= Number(p.updatedAtMs || 0));
+        });
         state.products.forEach((p) => {
           if (p.category === 'console' && (p.shippingFee === 150 || p.shippingFee === '150')) {
             p.shippingFee = 200;
@@ -625,7 +642,9 @@ async function loadInitialData() {
           }
         });
         if (changed) {
-          localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(state.products));
+          try {
+            localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(state.products));
+          } catch (e) {}
         }
       }
     }
@@ -633,9 +652,12 @@ async function loadInitialData() {
     if (savedOrders) {
       state.orders = JSON.parse(savedOrders);
     }
+    // Remove legacy stuck v1 cart key from earlier quota-overflow bug
+    try { localStorage.removeItem('takeit_cart_v1'); } catch (e) {}
     const savedCart = localStorage.getItem(STORAGE_KEYS.CART);
     if (savedCart) {
-      state.cart = JSON.parse(savedCart);
+      const parsedCart = JSON.parse(savedCart);
+      state.cart = Array.isArray(parsedCart) ? parsedCart : [];
     }
     const savedSupport = localStorage.getItem(STORAGE_KEYS.SUPPORT);
     if (savedSupport) {
@@ -669,7 +691,11 @@ async function loadInitialData() {
       const json = await res.json();
       if (json && json.data) {
         if (Array.isArray(json.data.products) && json.data.products.length > 0) {
-          state.products = json.data.products;
+          state.products = json.data.products.filter((p) => {
+            if (!p || !p.id || p.isDeleted) return false;
+            const delMs = Number(state.deletedProductsMap[p.id] || 0);
+            return !(delMs > 0 && delMs >= Number(p.updatedAtMs || 0));
+          });
         }
         if (Array.isArray(json.data.orders) && json.data.orders.length > 0) {
           state.orders = json.data.orders;
@@ -683,14 +709,17 @@ async function loadInitialData() {
     // Running statically without server.js — totally fine
   }
 
-  if (!Array.isArray(state.products) || state.products.length === 0) {
+  const hasSavedProductsKey = localStorage.getItem(STORAGE_KEYS.PRODUCTS) !== null;
+  const hasDeletedHistory = Object.keys(state.deletedProductsMap || {}).length > 0;
+  if ((!Array.isArray(state.products) || state.products.length === 0) && !hasSavedProductsKey && !hasDeletedHistory) {
     state.products = [...DEFAULT_PRODUCTS];
   }
-  state.products = ensureProductGalleryImages(state.products);
+  state.products = ensureProductGalleryImages(state.products || []);
 
   // 3. Connect to Firebase Firestore or Supabase if configured
   await initCloudConnection();
-  state.products = ensureProductGalleryImages(state.products);
+  state.products = ensureProductGalleryImages(state.products || []);
+  pruneCartAgainstCatalog();
 
   saveStateLocally();
   renderAll();
@@ -701,16 +730,61 @@ async function loadInitialData() {
   }
 }
 
-function saveStateLocally() {
+function pruneCartAgainstCatalog() {
+  if (!Array.isArray(state.cart) || state.cart.length === 0) return;
+  const prodMap = new Map((state.products || []).map((p) => [p.id, p]));
+  const filtered = state.cart.filter((item) => item && item.productId && prodMap.has(item.productId));
+  if (filtered.length !== state.cart.length) {
+    state.cart = filtered;
+  }
+}
+
+function safeSetLocalStorage(key, value) {
   try {
-    localStorage.setItem(STORAGE_KEYS.PRODUCTS, JSON.stringify(state.products));
-    localStorage.setItem(STORAGE_KEYS.ORDERS, JSON.stringify(state.orders));
-    localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(state.settings));
-    localStorage.setItem(STORAGE_KEYS.CART, JSON.stringify(state.cart));
-    localStorage.setItem(STORAGE_KEYS.SUPPORT, JSON.stringify(state.supportTickets));
-    localStorage.setItem(STORAGE_KEYS.CONSOLE_SESSIONS, JSON.stringify(state.consoleSessions || []));
+    localStorage.setItem(key, JSON.stringify(value));
+    return true;
   } catch (err) {
-    console.warn('LocalStorage quota warning:', err);
+    return false;
+  }
+}
+
+function saveStateLocally() {
+  // 1. Always save lightweight, critical keys FIRST so large images never block cart/deletions via QuotaExceededError
+  const compactCart = (state.cart || []).map((item) => ({
+    ...item,
+    image: (item.image && String(item.image).startsWith('data:') && String(item.image).length > 4000) ? '' : (item.image || '')
+  }));
+  safeSetLocalStorage(STORAGE_KEYS.CART, compactCart);
+  safeSetLocalStorage(STORAGE_KEYS.DELETED_PRODUCTS, state.deletedProductsMap || {});
+  safeSetLocalStorage(STORAGE_KEYS.CONSOLE_SESSIONS, state.consoleSessions || []);
+  safeSetLocalStorage(STORAGE_KEYS.SETTINGS, state.settings);
+
+  // 2. Save support tickets (fallback without heavy base64 attachments if localStorage is full)
+  if (!safeSetLocalStorage(STORAGE_KEYS.SUPPORT, state.supportTickets || [])) {
+    const liteTickets = (state.supportTickets || []).map((t) => ({
+      ...t,
+      imageDataUrl: (t.imageDataUrl && String(t.imageDataUrl).length > 4000) ? '' : (t.imageDataUrl || '')
+    }));
+    safeSetLocalStorage(STORAGE_KEYS.SUPPORT, liteTickets);
+  }
+
+  // 3. Save orders (fallback stripping base64 slip images in localStorage cache only; Firebase keeps full slips)
+  if (!safeSetLocalStorage(STORAGE_KEYS.ORDERS, state.orders || [])) {
+    const liteOrders = (state.orders || []).slice(0, 60).map((o) => ({
+      ...o,
+      slipDataUrl: (o.slipDataUrl && String(o.slipDataUrl).length > 4000) ? '' : (o.slipDataUrl || '')
+    }));
+    safeSetLocalStorage(STORAGE_KEYS.ORDERS, liteOrders);
+  }
+
+  // 4. Save products (fallback stripping oversized custom base64 images in localStorage cache only; Firebase keeps full images)
+  if (!safeSetLocalStorage(STORAGE_KEYS.PRODUCTS, state.products || [])) {
+    const liteProducts = (state.products || []).map((p) => ({
+      ...p,
+      image: (p.image && String(p.image).startsWith('data:image/') && !String(p.image).startsWith('data:image/svg') && String(p.image).length > 4000) ? '' : (p.image || ''),
+      images: []
+    }));
+    safeSetLocalStorage(STORAGE_KEYS.PRODUCTS, liteProducts);
   }
 
   // Also persist to local server API asynchronously if available
@@ -719,6 +793,7 @@ function saveStateLocally() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       products: state.products,
+      deletedProductsMap: state.deletedProductsMap,
       orders: state.orders,
       supportTickets: state.supportTickets,
       consoleSessions: state.consoleSessions,
@@ -769,16 +844,40 @@ async function initCloudConnection() {
       // 1. Initial fetch of products from Firestore
       const prodSnap = await fsMod.getDocs(fsMod.collection(db, 'takeit_products'));
       if (!prodSnap.empty) {
-        const cloudProducts = [];
-        prodSnap.forEach((docSnap) => cloudProducts.push(docSnap.data()));
-        const cloudMap = new Map(cloudProducts.map((p) => [p.id, p]));
+        const cloudMap = new Map();
+        prodSnap.forEach((docSnap) => {
+          const p = docSnap.data();
+          const pid = p?.id || docSnap.id;
+          if (!pid) return;
+          if (p.isDeleted) {
+            const delMs = Math.max(Number(p.deletedAtMs || 0), Number(p.updatedAtMs || 0), 1);
+            state.deletedProductsMap[pid] = Math.max(Number(state.deletedProductsMap[pid] || 0), delMs);
+            cloudMap.delete(pid);
+            return;
+          }
+          const localDelMs = Number(state.deletedProductsMap[pid] || 0);
+          if (localDelMs > 0 && localDelMs >= Number(p.updatedAtMs || 0)) {
+            // Was deleted locally more recently — sync tombstone up to Firestore
+            fsMod.setDoc(fsMod.doc(db, 'takeit_products', docSnap.id), {
+              id: pid,
+              isDeleted: true,
+              deletedAtMs: localDelMs,
+              updatedAtMs: localDelMs
+            }).catch(() => {});
+            return;
+          }
+          cloudMap.set(pid, p);
+        });
 
-        // Push any custom or more recently updated products from this device's localStorage to Cloud
+        // Push any custom or more recently updated products (that were NOT deleted) to Cloud
         for (const lp of state.products) {
-          if (!lp || !lp.id) continue;
+          if (!lp || !lp.id || lp.isDeleted) continue;
+          const delMs = Number(state.deletedProductsMap[lp.id] || 0);
+          const localTime = Number(lp.updatedAtMs || 0);
+          if (delMs > 0 && delMs >= localTime) continue;
+
           const isCustomLocal = /^PROD-\d+$/.test(String(lp.id)) || lp.isCustom;
           const cloudProd = cloudMap.get(lp.id);
-          const localTime = Number(lp.updatedAtMs || 0);
           const cloudTime = Number(cloudProd?.updatedAtMs || 0);
           if ((isCustomLocal && !cloudProd) || (cloudProd && localTime > cloudTime)) {
             const cleanedLp = ensureProductGalleryImages([lp])[0];
@@ -788,8 +887,10 @@ async function initCloudConnection() {
         }
         state.products = sortProductsCatalog(ensureProductGalleryImages(Array.from(cloudMap.values())));
       } else {
-        // Firestore collection is empty — upload current products to seed Firestore
-        await pushAllToCloud();
+        // Firestore collection is empty — only seed if user hasn't intentionally deleted products
+        if (Object.keys(state.deletedProductsMap || {}).length === 0) {
+          await pushAllToCloud();
+        }
       }
 
       // 2. Initial fetch & merge of orders from Firestore
@@ -849,20 +950,32 @@ async function initCloudConnection() {
       // 4. Real-time listeners so any product or order added on one device appears on all other devices automatically
       if (!state.unsubscribeFirestore) {
         const unsubProd = fsMod.onSnapshot(fsMod.collection(db, 'takeit_products'), (snap) => {
-          if (snap.empty) return;
           const localMap = new Map((state.products || []).map((p) => [p.id, p]));
-          const liveProducts = [];
+          const liveMap = new Map();
           snap.forEach((d) => {
             const cloudProd = d.data();
-            const localProd = localMap.get(cloudProd.id);
-            if (localProd && Number(localProd.updatedAtMs || 0) > Number(cloudProd.updatedAtMs || 0)) {
-              liveProducts.push(localProd);
-            } else {
-              liveProducts.push(cloudProd);
+            const pid = cloudProd?.id || d.id;
+            if (!pid) return;
+            if (cloudProd.isDeleted) {
+              const delMs = Math.max(Number(cloudProd.deletedAtMs || 0), Number(cloudProd.updatedAtMs || 0), 1);
+              state.deletedProductsMap[pid] = Math.max(Number(state.deletedProductsMap[pid] || 0), delMs);
+              liveMap.delete(pid);
+              return;
             }
+            const localDelMs = Number(state.deletedProductsMap[pid] || 0);
+            if (localDelMs > 0 && localDelMs >= Number(cloudProd.updatedAtMs || 0)) {
+              return;
+            }
+            const localProd = localMap.get(pid);
+            const picked = (localProd && !localProd.isDeleted && Number(localProd.updatedAtMs || 0) > Number(cloudProd.updatedAtMs || 0))
+              ? localProd
+              : cloudProd;
+            liveMap.set(pid, picked);
           });
-          state.products = sortProductsCatalog(ensureProductGalleryImages(liveProducts));
+          state.products = sortProductsCatalog(ensureProductGalleryImages(Array.from(liveMap.values())));
+          pruneCartAgainstCatalog();
           saveStateLocally();
+          renderCartBadge();
           renderStorefront();
           if (document.getElementById('dialog-cart')?.open) {
             renderCartModalContents();
@@ -923,6 +1036,11 @@ async function initCloudConnection() {
 
         const mergeEsp32CloudSnapshot = (snap) => {
           const existingMap = new Map((state.consoleSessions || []).map((s) => [s.deviceId || s.id, s]));
+          const getFreshnessMs = (rec) => {
+            const eMs = Number(rec?.last_timestamp || 0) > 1700000000 ? Number(rec.last_timestamp) * 1000 : 0;
+            return Math.max(eMs, Number(rec?.updatedAtMs || 0), Number(rec?.manualActionAtMs || 0));
+          };
+
           snap.forEach((d) => {
             const rawData = d.data();
             const devKey = String(rawData.console_name || rawData.deviceId || rawData.esp32DeviceId || d.id).trim();
@@ -950,13 +1068,12 @@ async function initCloudConnection() {
               return;
             }
 
-            const mergedRaw = {
-              ...prev,
-              ...rawData,
-              id: devKey,
-              deviceId: devKey,
-              isDeleted: false
-            };
+            const prevFresh = getFreshnessMs(prev);
+            const cloudFresh = getFreshnessMs(rawData);
+            const mergedRaw = prevFresh > cloudFresh
+              ? { ...rawData, ...prev, id: devKey, deviceId: devKey, isDeleted: false }
+              : { ...prev, ...rawData, id: devKey, deviceId: devKey, isDeleted: false };
+
             const norm = normalizeEsp32SessionRecord(mergedRaw, devKey);
             if (norm) {
               existingMap.set(devKey, norm);
@@ -1047,17 +1164,35 @@ async function saveProductToCloud(product) {
   }
 }
 
-async function deleteProductFromCloud(productId) {
+async function deleteProductFromCloud(productId, deletedAtMs = Date.now()) {
   if (state.settings.cloudProvider === 'firebase') {
     if (!state.firestoreDb || !state.firebaseModules) {
       await initCloudConnection();
     }
     if (state.firestoreDb && state.firebaseModules) {
       try {
-        const { doc, deleteDoc } = state.firebaseModules;
-        await deleteDoc(doc(state.firestoreDb, 'takeit_products', productId));
+        const { doc, setDoc, collection, getDocs, deleteDoc } = state.firebaseModules;
+        const tombstone = {
+          id: productId,
+          isDeleted: true,
+          deletedAtMs,
+          updatedAtMs: deletedAtMs
+        };
+        // Write lightweight tombstone to prevent any other tab/device cache from resurrecting deleted product
+        await setDoc(doc(state.firestoreDb, 'takeit_products', productId), tombstone);
+
+        // Also clean up if any legacy/duplicate Firestore document exists with different doc.id
+        const snap = await getDocs(collection(state.firestoreDb, 'takeit_products')).catch(() => null);
+        if (snap && !snap.empty) {
+          for (const d of snap.docs) {
+            if (d.id !== productId && d.data()?.id === productId) {
+              await deleteDoc(doc(state.firestoreDb, 'takeit_products', d.id)).catch(() => {});
+            }
+          }
+        }
       } catch (err) {
         console.error('Firestore delete product error:', err);
+        showToast('⚠️ ลบในเครื่องแล้ว แต่ไม่สามารถลบสินค้าบน Firebase ได้: ' + (err.message || ''), 'warning');
       }
     }
   } else if (state.settings.cloudProvider === 'supabase' && state.settings.supabaseUrl && state.settings.supabaseKey) {
@@ -2405,6 +2540,7 @@ function renderCartModalContents() {
       : `<strong style="color:#38bdf8;">${formatTHB(unitShip)}</strong> <span style="font-size:0.75rem; color:var(--text-muted);">(คิดเหมาตามชิ้นที่แพงสุดครั้งเดียว)</span>`;
 
     const prod = state.products.find((p) => p.id === item.productId);
+    const itemImg = (prod && prod.image) || item.image || makeProductBannerSvg(item.name || 'TakeIT', item.platform || 'Console', '#1e3a8a', '#0f172a', '🎮');
     const maxStock = getProductAvailableStock(prod);
     const totalInCartForProd = getProductQtyInCart(item.productId);
     const isAtStockLimit = !prod || maxStock <= 0 || totalInCartForProd >= maxStock;
@@ -2436,7 +2572,7 @@ function renderCartModalContents() {
       const depCost = item.deposit * qty;
       return `
         <div class="cart-item">
-          <img src="${item.image}" alt="${escapeXml(item.name)}">
+          <img src="${itemImg}" alt="${escapeXml(item.name)}">
           <div>
             <span class="badge badge-purple">💿 เช่าแผ่นเกมรายวัน (${item.rentDays} วัน)</span>
             <h4 style="margin:0.25rem 0 0.15rem;">${escapeXml(item.name)} (${escapeXml(item.platform)})</h4>
@@ -2457,7 +2593,7 @@ function renderCartModalContents() {
       const installCost = Number(item.installFee || 0) * qty;
       return `
         <div class="cart-item">
-          <img src="${item.image}" alt="${escapeXml(item.name)}">
+          <img src="${itemImg}" alt="${escapeXml(item.name)}">
           <div>
             <span class="badge badge-emerald">🏠 เช่าเครื่องติดตั้งที่บ้าน + คิดรายชั่วโมงตามจริง (ESP32)</span>
             <h4 style="margin:0.25rem 0 0.15rem;">${escapeXml(item.name)} (${escapeXml(item.platform)})</h4>
@@ -2476,7 +2612,7 @@ function renderCartModalContents() {
       const lineTotal = item.price * qty;
       return `
         <div class="cart-item">
-          <img src="${item.image}" alt="${escapeXml(item.name)}">
+          <img src="${itemImg}" alt="${escapeXml(item.name)}">
           <div>
             <span class="badge badge-cyan">🛒 ซื้อขาด</span>
             <h4 style="margin:0.25rem 0 0.15rem;">${escapeXml(item.name)} (${escapeXml(item.platform)})</h4>
@@ -2834,11 +2970,17 @@ function renderAdminProductsTable() {
       const id = btn.getAttribute('data-del-prod');
       const prod = state.products.find((p) => p.id === id);
       if (!prod) return;
+      const nowMs = Date.now();
+      if (!state.deletedProductsMap || typeof state.deletedProductsMap !== 'object') {
+        state.deletedProductsMap = {};
+      }
+      state.deletedProductsMap[id] = nowMs;
       state.products = state.products.filter((p) => p.id !== id);
+      state.cart = (state.cart || []).filter((c) => c.productId !== id);
       saveStateLocally();
-      await deleteProductFromCloud(id);
       renderAll();
-      showToast(`🗑️ ลบสินค้า "${prod.name}" เรียบร้อยแล้ว`);
+      await deleteProductFromCloud(id, nowMs);
+      showToast(`🗑️ ลบสินค้า "${prod.name}" ออกจากระบบและฐานข้อมูลถาวรเรียบร้อยแล้ว`);
     });
   });
 }
@@ -3640,9 +3782,14 @@ document.addEventListener('DOMContentLoaded', () => {
       image: finalImages[0],
       images: finalImages,
       isCustom: true,
+      isDeleted: false,
       createdAtMs: existingProd?.createdAtMs || nowMs,
       updatedAtMs: nowMs
     };
+
+    if (state.deletedProductsMap && state.deletedProductsMap[prodObj.id]) {
+      delete state.deletedProductsMap[prodObj.id];
+    }
 
     if (existingId) {
       const idx = state.products.findIndex((p) => p.id === existingId);
@@ -3779,7 +3926,9 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-push-local-to-cloud')?.addEventListener('click', pushAllToCloud);
 
   document.getElementById('btn-reset-demo-data')?.addEventListener('click', () => {
-    state.products = [...DEFAULT_PRODUCTS];
+    const nowMs = Date.now();
+    state.deletedProductsMap = {};
+    state.products = DEFAULT_PRODUCTS.map((p) => ({ ...p, isDeleted: false, updatedAtMs: nowMs }));
     saveStateLocally();
     renderAll();
     showToast('🔄 รีเซ็ตรายการสินค้าตัวอย่างเริ่มต้นเรียบร้อยแล้ว');
@@ -5240,15 +5389,23 @@ async function syncAllSupportTicketsToGoogleSheet() {
 // ============================================================================
 // Home Console Installation & Real-time ESP32 Hourly Meter Engine
 // ============================================================================
+const esp32ClientSyncTracker = new Map();
+
 function normalizeEsp32SessionRecord(raw, docId = '') {
   if (!raw || typeof raw !== 'object') return null;
   const deviceId = String(raw.console_name || raw.deviceId || raw.esp32DeviceId || raw.boardId || docId || 'PS4_01').trim();
   const id = String(raw.id || docId || deviceId);
 
-  // Support exact fields from ESP32 sketch (total_minutes, total_hours, last_timestamp, last_active, current_session, session_minutes)
+  // Support exact fields from ESP32 sketch (total_seconds, total_minutes, total_hours, last_timestamp, last_active, current_session, session_minutes)
   // as well as Admin manual fields (baseAccumulatedSeconds)
   let baseSeconds = 0;
-  if (raw.total_minutes !== undefined && raw.total_minutes !== null && raw.total_minutes !== '') {
+  if (raw.total_seconds !== undefined && raw.total_seconds !== null && raw.total_seconds !== '') {
+    const secVal = Math.max(0, Math.round(Number(raw.total_seconds || 0)));
+    const hasMins = raw.total_minutes !== undefined && raw.total_minutes !== null && raw.total_minutes !== '';
+    const minValSec = hasMins ? Math.max(0, Math.round(Number(raw.total_minutes || 0) * 60)) : secVal;
+    // Prefer total_seconds when in sync with total_minutes; fallback cleanly if legacy 60s firmware updated total_minutes
+    baseSeconds = (!hasMins || Math.floor(secVal / 60) === Math.floor(minValSec / 60)) ? secVal : minValSec;
+  } else if (raw.total_minutes !== undefined && raw.total_minutes !== null && raw.total_minutes !== '') {
     baseSeconds = Math.round(Number(raw.total_minutes || 0) * 60);
   } else if (raw.baseAccumulatedSeconds !== undefined) {
     baseSeconds = Number(raw.baseAccumulatedSeconds) || 0;
@@ -5260,20 +5417,42 @@ function normalizeEsp32SessionRecord(raw, docId = '') {
     baseSeconds = Math.round(Number(raw.total_hours ?? raw.usageHours ?? raw.hours ?? 0) * 3600);
   }
 
-  // Heartbeat detection from ESP32's last_timestamp (epoch seconds, sent every 60s while console is powered on)
+  // Heartbeat detection from ESP32's last_timestamp (60s for legacy firmware, or 15s for upgraded firmware)
+  const heartbeatIntervalSec = Math.max(10, Number(raw.heartbeat_interval || 60));
+  const offlineTimeoutSec = Math.max(25, heartbeatIntervalSec + 12);
   const espEpochSec = Number(raw.last_timestamp || 0);
+
+  if (espEpochSec > 1700000000) {
+    const prevSync = esp32ClientSyncTracker.get(deviceId);
+    if (!prevSync || prevSync.espEpochSec !== espEpochSec || prevSync.baseSeconds !== baseSeconds) {
+      const ageMs = Math.max(0, Date.now() - (espEpochSec * 1000));
+      const anchorMs = ageMs <= 15000 ? Date.now() : (espEpochSec * 1000);
+      esp32ClientSyncTracker.set(deviceId, { espEpochSec, baseSeconds, anchorMs });
+    }
+  }
+
+  const syncEntry = esp32ClientSyncTracker.get(deviceId);
   const nowSec = Math.floor(Date.now() / 1000);
-  const hasRecentEspHeartbeat = espEpochSec > 1700000000 && (nowSec - espEpochSec) <= 75;
+  const elapsedSinceSyncSec = syncEntry && espEpochSec > 1700000000
+    ? Math.max(0, Math.floor((Date.now() - syncEntry.anchorMs) / 1000))
+    : Math.max(0, nowSec - espEpochSec);
+
+  const manualStandbyBlocked = Boolean(
+    raw.manualStandbyAtSec && espEpochSec > 0 && Number(raw.manualStandbyAtSec) >= espEpochSec && !raw.manualSimulatedOnline
+  );
+  const hasRecentEspHeartbeat = espEpochSec > 1700000000 && elapsedSinceSyncSec <= offlineTimeoutSec && !manualStandbyBlocked;
+  const isTimedOutEsp = espEpochSec > 1700000000 && elapsedSinceSyncSec > offlineTimeoutSec && !raw.manualSimulatedOnline;
 
   const isOnline = Boolean(
     hasRecentEspHeartbeat ||
+    raw.manualSimulatedOnline ||
     raw.powerStatus === 'online' ||
     raw.status === 'online' ||
     raw.isOnline === true ||
     raw.powerOn === true ||
     raw.isRunning === true ||
     raw.consoleOn === true
-  ) && !(espEpochSec > 1700000000 && (nowSec - espEpochSec) > 75 && !raw.manualSimulatedOnline);
+  ) && !isTimedOutEsp && !manualStandbyBlocked;
 
   const inferredPlatform = deviceId.toUpperCase().includes('PS4')
     ? 'PS4'
@@ -5287,11 +5466,24 @@ function normalizeEsp32SessionRecord(raw, docId = '') {
     ? espEpochSec * 1000
     : Number(raw.updatedAtMs || Date.now());
 
+  let lastStartTimeMs = null;
+  if (isOnline) {
+    if (raw.manualSimulatedOnline && raw.lastStartTimeMs) {
+      lastStartTimeMs = Number(raw.lastStartTimeMs);
+    } else if (syncEntry && syncEntry.espEpochSec === espEpochSec) {
+      lastStartTimeMs = syncEntry.anchorMs;
+    } else {
+      lastStartTimeMs = updatedAtMs;
+    }
+  }
+
   return {
     ...raw,
     id,
     deviceId,
     console_name: deviceId,
+    heartbeat_interval: heartbeatIntervalSec,
+    total_seconds: Math.max(0, baseSeconds),
     total_minutes: Math.floor(baseSeconds / 60),
     total_hours: Number((baseSeconds / 3600).toFixed(2)),
     current_session: raw.current_session || '',
@@ -5310,7 +5502,7 @@ function normalizeEsp32SessionRecord(raw, docId = '') {
     orderId: raw.orderId || '',
     baseAccumulatedSeconds: Math.max(0, baseSeconds),
     powerStatus: isOnline ? 'online' : 'standby',
-    lastStartTimeMs: isOnline ? Number(raw.lastStartTimeMs || updatedAtMs || Date.now()) : null,
+    lastStartTimeMs,
     updatedAtMs,
     lastHeartbeatFormatted: raw.last_active || raw.lastHeartbeatFormatted || new Date(updatedAtMs).toLocaleString('th-TH')
   };
@@ -5322,10 +5514,9 @@ function getLiveEsp32SessionStats(session) {
   if (norm.powerStatus === 'online' && norm.lastStartTimeMs) {
     const elapsedSec = Math.max(0, Math.floor((Date.now() - Number(norm.lastStartTimeMs)) / 1000));
     const hasEspEpoch = Number(norm.last_timestamp || 0) > 1700000000 && !norm.manualSimulatedOnline;
-    // Use exact confirmed minutes from real ESP32 hardware so unplugging never counts fake seconds or resets back
-    if (!hasEspEpoch) {
-      totalSec += elapsedSec;
-    }
+    const heartbeatInterval = Math.max(10, Number(norm.heartbeat_interval || 60));
+    // Smoothly tick second-by-second between ESP32 heartbeats (capped right before next packet)
+    totalSec += hasEspEpoch ? Math.min(heartbeatInterval - 1, elapsedSec) : elapsedSec;
   }
   const hrs = Math.floor(totalSec / 3600);
   const mins = Math.floor((totalSec % 3600) / 60);
@@ -5347,20 +5538,23 @@ function getLiveEsp32SessionStats(session) {
     hourlyRate,
     liveCost,
     liveCostFormatted: '฿' + liveCost.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-    isOnline: norm.powerStatus === 'online'
+    isOnline: norm.powerStatus === 'online',
+    heartbeatInterval: Number(norm.heartbeat_interval || 60)
   };
 }
 
 async function saveEsp32SessionToCloud(session) {
   if (!session || !session.id) return;
   const devId = session.deviceId || session.id;
-  const totalMins = Math.floor(Number(session.baseAccumulatedSeconds || 0) / 60);
-  const totalHrs = Number((totalMins / 60).toFixed(2));
+  const totalSecs = Math.max(0, Math.round(Number(session.baseAccumulatedSeconds || 0)));
+  const totalMins = Math.floor(totalSecs / 60);
+  const totalHrs = Number((totalSecs / 3600).toFixed(2));
   const payload = {
     ...session,
     id: devId,
     deviceId: devId,
     console_name: devId,
+    total_seconds: totalSecs,
     total_minutes: totalMins,
     total_hours: totalHrs
   };
@@ -5713,8 +5907,8 @@ function renderEsp32LiveMeterResults(rawQuery = '') {
         <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; font-size:0.8rem; color:var(--text-secondary); padding-block-start:0.5rem; border-block-start:1px dashed rgba(255,255,255,0.08);">
           <span>
             ${s.current_session
-              ? `🕹️ รอบการเล่นล่าสุด (Session): <strong>${escapeXml(s.current_session)}</strong> • เล่นรอบนี้แล้ว <strong>${Number(s.session_minutes || 0)} นาที</strong>`
-              : `📡 บอร์ด ESP32 (${escapeXml(s.deviceId)}) ส่งข้อมูลทุก 1 นาทีเข้า Firebase เว็บเราโดยตรง`
+              ? `🕹️ รอบการเล่นล่าสุด (Session): <strong>${escapeXml(s.current_session)}</strong> • เล่นรอบนี้แล้ว <strong>${Number(s.session_minutes || 0)} นาที</strong> (ซิงค์บอร์ดทุก ${stats.heartbeatInterval} วินาที)`
+              : `📡 บอร์ด ESP32 (${escapeXml(s.deviceId)}) ส่งข้อมูลทุก ${stats.heartbeatInterval} วินาทีเข้า Firebase เว็บเราโดยตรง`
             }
             <br><span style="color:#6ee7b7; font-size:0.75rem;">🕗 รอบเก็บค่าเช่ารายชั่วโมง: เก็บแบบวันต่อวัน โดยทางร้านจะติดต่อหาลูกค้าช่วงเวลา <strong>20.00 น.</strong> ของทุกวัน</span>
             <br><span style="color:#fcd34d; font-size:0.75rem;">⚠️ เงื่อนไขสัญญา: หากหยุดใช้เครื่องติดต่อกันเกิน 2 วัน ทางร้านขอติดต่อนำเครื่องคืนเพื่อให้คิวลูกค้าท่านอื่น</span>
@@ -5828,19 +6022,24 @@ async function toggleEsp32SessionPowerState(sessionId) {
   const stats = getLiveEsp32SessionStats(target);
   if (stats.isOnline) {
     target.baseAccumulatedSeconds = stats.totalSeconds;
+    target.total_seconds = stats.totalSeconds;
     target.total_minutes = Math.floor(stats.totalSeconds / 60);
     target.total_hours = Number((stats.totalSeconds / 3600).toFixed(2));
     target.powerStatus = 'standby';
     target.manualSimulatedOnline = false;
+    target.manualStandbyAtSec = Number(target.last_timestamp || Math.floor(nowMs / 1000));
     target.lastStartTimeMs = null;
   } else {
     target.baseAccumulatedSeconds = stats.totalSeconds;
+    target.total_seconds = stats.totalSeconds;
     target.total_minutes = Math.floor(stats.totalSeconds / 60);
     target.total_hours = Number((stats.totalSeconds / 3600).toFixed(2));
     target.powerStatus = 'online';
     target.manualSimulatedOnline = true;
+    target.manualStandbyAtSec = 0;
     target.lastStartTimeMs = nowMs;
   }
+  target.manualActionAtMs = nowMs;
   target.updatedAtMs = nowMs;
   target.lastHeartbeatFormatted = new Date(nowMs).toLocaleString('th-TH');
 
@@ -5905,7 +6104,7 @@ function renderAdminEsp32Sessions() {
         </div>
 
         <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; padding-block-start:0.6rem; border-block-start:1px solid rgba(255,255,255,0.08);">
-          <span style="font-size:0.75rem; color:var(--text-muted);">อัปเดตล่าสุด: ${escapeXml(s.lastHeartbeatFormatted || '-')}</span>
+          <span style="font-size:0.75rem; color:var(--text-muted);">อัปเดตล่าสุด: ${escapeXml(s.lastHeartbeatFormatted || '-')} • รอบซิงค์บอร์ดทุก ${stats.heartbeatInterval} วิ</span>
           <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
             <button type="button" class="btn btn-primary btn-sm" data-admin-esp32-contract="${escapeXml(s.id)}">
               📜 ดู/พิมพ์สัญญาเช่าติดบ้าน
@@ -5959,12 +6158,19 @@ function renderAdminEsp32Sessions() {
       const stats = getLiveEsp32SessionStats(target);
       const nowMs = Date.now();
       target.baseAccumulatedSeconds = 0;
+      target.total_seconds = 0;
       target.total_minutes = 0;
       target.total_hours = 0;
       target.session_minutes = 0;
       target.lastStartTimeMs = stats.isOnline ? nowMs : null;
+      target.manualActionAtMs = nowMs;
       target.updatedAtMs = nowMs;
       target.lastHeartbeatFormatted = new Date(nowMs).toLocaleString('th-TH');
+      esp32ClientSyncTracker.set(target.deviceId || target.id, {
+        espEpochSec: Number(target.last_timestamp || 0),
+        baseSeconds: 0,
+        anchorMs: nowMs
+      });
       saveStateLocally();
       await saveEsp32SessionToCloud(target);
       refreshEsp32ViewsIfOpen();

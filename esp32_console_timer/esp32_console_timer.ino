@@ -25,11 +25,14 @@ const long  gmtOffset_sec = 7 * 3600; // เวลาประเทศไทย
 const int   daylightOffset_sec = 0;
 
 unsigned long lastUpdate = 0;
-const unsigned long updateInterval = 60000; // ส่งข้อมูลทุกๆ 1 นาที (60,000 ms)
+const unsigned long updateInterval = 15000; // ส่งข้อมูลทุกๆ 15 วินาที (แม่นยำระดับวินาทีและจับตอนถอดปลั๊กได้ไว)
+const int heartbeatIntervalSec = 15;
 
 String sessionID = "";
 String sessionStartStr = "";
-int sessionMinutes = 0;
+unsigned long sessionSeconds = 0;
+unsigned long lastSyncedTotalSeconds = 0;
+unsigned int syncCounter = 0;
 
 // ฟังก์ชันดึงเวลาปัจจุบัน
 String getFormattedTime(const char* format) {
@@ -53,11 +56,29 @@ unsigned long getEpochTime() {
   return now;
 }
 
-// ฟังก์ชันอ่านจำนวนนาทีสะสมเดิมจาก Firebase Firestore (คอลเลกชัน ps4_tracker ของเว็บ TakeIT)
-int getCurrentTotalMinutes() {
+// ช่วยดึงค่า integer จาก Firestore REST JSON อย่างปลอดภัย
+long extractFirestoreInt(const String& payload, const char* fieldName, long fallback = -1) {
+  String searchKey = String("\"") + fieldName + "\"";
+  int keyIdx = payload.indexOf(searchKey);
+  if (keyIdx == -1) return fallback;
+  int objEnd = payload.indexOf("}", keyIdx);
+  int intIdx = payload.indexOf("\"integerValue\"", keyIdx);
+  if (intIdx == -1 || (objEnd != -1 && intIdx > objEnd)) return fallback;
+  int colonIdx = payload.indexOf(":", intIdx);
+  int valStart = payload.indexOf("\"", colonIdx);
+  int valEnd = payload.indexOf("\"", valStart + 1);
+  if (valStart != -1 && valEnd != -1) {
+    return payload.substring(valStart + 1, valEnd).toInt();
+  }
+  return fallback;
+}
+
+// ฟังก์ชันอ่านจำนวนวินาทีสะสมเดิมจาก Firebase Firestore (คอลเลกชัน ps4_tracker ของเว็บ TakeIT)
+unsigned long getCurrentTotalSeconds() {
   WiFiClientSecure client;
   client.setInsecure();
   HTTPClient http;
+  http.setTimeout(15000);
 
   String url = "https://firestore.googleapis.com/v1/projects/" + FIREBASE_PROJECT_ID +
                "/databases/(default)/documents/ps4_tracker/" + CONSOLE_ID +
@@ -65,49 +86,55 @@ int getCurrentTotalMinutes() {
 
   http.begin(client, url);
   int httpResponseCode = http.GET();
-  int totalMins = 0;
+  unsigned long totalSecs = lastSyncedTotalSeconds;
 
   if (httpResponseCode == 200) {
     String payload = http.getString();
-    // ค้นหาค่า "total_minutes" จาก Firestore JSON response
-    int keyIdx = payload.indexOf("\"total_minutes\"");
-    if (keyIdx != -1) {
-      int intIdx = payload.indexOf("\"integerValue\"", keyIdx);
-      if (intIdx != -1) {
-        int colonIdx = payload.indexOf(":", intIdx);
-        int valStart = payload.indexOf("\"", colonIdx);
-        int valEnd = payload.indexOf("\"", valStart + 1);
-        if (valStart != -1 && valEnd != -1) {
-          totalMins = payload.substring(valStart + 1, valEnd).toInt();
-        }
-      }
+    long secsVal = extractFirestoreInt(payload, "total_seconds", -1);
+    long minsVal = extractFirestoreInt(payload, "total_minutes", 0);
+    if (minsVal < 0) minsVal = 0;
+    if (secsVal >= 0 && (secsVal / 60) == minsVal) {
+      totalSecs = (unsigned long)secsVal;
+    } else {
+      totalSecs = (unsigned long)minsVal * 60UL;
     }
+  } else {
+    Serial.printf("[Firebase GET Warning] Code: %d (%s)\n", httpResponseCode, http.errorToString(httpResponseCode).c_str());
   }
   http.end();
-  return totalMins;
+  return totalSecs;
 }
 
 // ฟังก์ชันส่งข้อมูลอัปเดตเข้า Firebase ตัวเดิมของเว็บ TakeIT (อัปเดตหน้าเว็บแบบ Real-time ทันที)
-void updateFirebase(bool isInitialBoot) {
+void updateFirebase(bool isInitialBoot, unsigned long deltaSeconds = 0) {
   if (WiFi.status() != WL_CONNECTED) return;
 
-  WiFiClientSecure client;
-  client.setInsecure();
-  HTTPClient http;
-
-  int totalMinutes = getCurrentTotalMinutes();
-  if (!isInitialBoot) {
-    totalMinutes += 1;
-    sessionMinutes += 1;
+  // เช็กยอดสะสมจาก Cloud เฉพาะตอนเปิดเครื่อง และทุกๆ 1 นาที (ลดการใช้ TLS ซ้อนกันและประหยัด Read)
+  unsigned long totalSeconds = lastSyncedTotalSeconds;
+  if (isInitialBoot || (syncCounter % 4 == 0)) {
+    totalSeconds = getCurrentTotalSeconds();
   }
 
-  float totalHours = round((totalMinutes / 60.0) * 100.0) / 100.0;
+  if (!isInitialBoot) {
+    if (totalSeconds == 0 && lastSyncedTotalSeconds >= (unsigned long)heartbeatIntervalSec) {
+      sessionSeconds = 0; // กรณีแอดมินกดรีเซ็ตบิลบนหน้าเว็บ
+    }
+    totalSeconds += deltaSeconds;
+    sessionSeconds += deltaSeconds;
+  }
+  lastSyncedTotalSeconds = totalSeconds;
+
+  unsigned long totalMinutes = totalSeconds / 60UL;
+  unsigned long sessionMinutes = sessionSeconds / 60UL;
+  float totalHours = round((totalSeconds / 3600.0) * 100.0) / 100.0;
   String currentTimeStr = getFormattedTime("%d/%m/%Y %H:%M:%S");
   unsigned long currentEpoch = getEpochTime();
 
   // อัปเดตเฉพาะฟิลด์เวลาของบอร์ด โดยไม่ทับข้อมูลชื่อลูกค้าหรือเรทราคาที่แอดมินตั้งไว้บนเว็บ
   String updateMask = "updateMask.fieldPaths=console_name"
                       "&updateMask.fieldPaths=deviceId"
+                      "&updateMask.fieldPaths=heartbeat_interval"
+                      "&updateMask.fieldPaths=total_seconds"
                       "&updateMask.fieldPaths=total_minutes"
                       "&updateMask.fieldPaths=total_hours"
                       "&updateMask.fieldPaths=last_active"
@@ -125,6 +152,8 @@ void updateFirebase(bool isInitialBoot) {
   body += "\"fields\":{";
   body += "\"console_name\":{\"stringValue\":\"" + CONSOLE_ID + "\"},";
   body += "\"deviceId\":{\"stringValue\":\"" + CONSOLE_ID + "\"},";
+  body += "\"heartbeat_interval\":{\"integerValue\":\"" + String(heartbeatIntervalSec) + "\"},";
+  body += "\"total_seconds\":{\"integerValue\":\"" + String(totalSeconds) + "\"},";
   body += "\"total_minutes\":{\"integerValue\":\"" + String(totalMinutes) + "\"},";
   body += "\"total_hours\":{\"doubleValue\":" + String(totalHours, 2) + "},";
   body += "\"last_active\":{\"stringValue\":\"" + currentTimeStr + "\"},";
@@ -135,32 +164,50 @@ void updateFirebase(bool isInitialBoot) {
   body += "\"powerStatus\":{\"stringValue\":\"online\"}";
   body += "}}";
 
-  http.begin(client, firestoreUrl);
-  http.addHeader("Content-Type", "application/json");
-  int httpCode1 = http.PATCH(body);
-  http.end();
+  int httpCode1 = -1;
+  {
+    WiFiClientSecure client1;
+    client1.setInsecure();
+    HTTPClient http1;
+    http1.setTimeout(15000);
+    http1.begin(client1, firestoreUrl);
+    http1.addHeader("Content-Type", "application/json");
+    httpCode1 = http1.PATCH(body);
+    if (httpCode1 <= 0) {
+      Serial.printf("[Firebase PATCH1 Error] Code: %d (%s)\n", httpCode1, http1.errorToString(httpCode1).c_str());
+    }
+    http1.end();
+  }
 
-  // บันทึกประวัติการเล่นรายรอบ (Session History)
-  String sessionUrl = "https://firestore.googleapis.com/v1/projects/" + FIREBASE_PROJECT_ID +
-                      "/databases/(default)/documents/ps4_tracker/" + CONSOLE_ID +
-                      "/sessions/" + sessionID + "?key=" + FIREBASE_API_KEY;
+  // บันทึกประวัติการเล่นรายรอบ (Session History) ตอนเปิดเครื่องและทุกๆ 1 นาทีเพื่อประหยัดโควต้า Write
+  int httpCode2 = 200;
+  if (isInitialBoot || (syncCounter % 4 == 0)) {
+    String sessionUrl = "https://firestore.googleapis.com/v1/projects/" + FIREBASE_PROJECT_ID +
+                        "/databases/(default)/documents/ps4_tracker/" + CONSOLE_ID +
+                        "/sessions/" + sessionID + "?key=" + FIREBASE_API_KEY;
 
-  String sessionBody = "{";
-  sessionBody += "\"fields\":{";
-  sessionBody += "\"start_time\":{\"stringValue\":\"" + sessionStartStr + "\"},";
-  sessionBody += "\"last_seen\":{\"stringValue\":\"" + currentTimeStr + "\"},";
-  sessionBody += "\"duration_minutes\":{\"integerValue\":\"" + String(sessionMinutes) + "\"}";
-  sessionBody += "}}";
+    String sessionBody = "{";
+    sessionBody += "\"fields\":{";
+    sessionBody += "\"start_time\":{\"stringValue\":\"" + sessionStartStr + "\"},";
+    sessionBody += "\"last_seen\":{\"stringValue\":\"" + currentTimeStr + "\"},";
+    sessionBody += "\"duration_minutes\":{\"integerValue\":\"" + String(sessionMinutes) + "\"}";
+    sessionBody += "}}";
 
-  http.begin(client, sessionUrl);
-  http.addHeader("Content-Type", "application/json");
-  int httpCode2 = http.PATCH(sessionBody);
-  http.end();
+    WiFiClientSecure client2;
+    client2.setInsecure();
+    HTTPClient http2;
+    http2.setTimeout(15000);
+    http2.begin(client2, sessionUrl);
+    http2.addHeader("Content-Type", "application/json");
+    httpCode2 = http2.PATCH(sessionBody);
+    http2.end();
+  }
+  syncCounter++;
 
   // ไฟสีฟ้ากะพริบ 1 ครั้งเมื่อส่งข้อมูลสำเร็จ
   if (httpCode1 == 200 && httpCode2 == 200) {
-    Serial.printf("[TakeIT Firebase Updated] Console: %s | Total: %d mins (%.2f hrs) | Session: %d mins\n",
-                  CONSOLE_ID.c_str(), totalMinutes, totalHours, sessionMinutes);
+    Serial.printf("[TakeIT Firebase Updated] Console: %s | Total: %lu secs (%lu mins, %.2f hrs)\n",
+                  CONSOLE_ID.c_str(), totalSeconds, totalMinutes, totalHours);
     digitalWrite(LED_PIN, HIGH);
     delay(150);
     digitalWrite(LED_PIN, LOW);
@@ -196,10 +243,10 @@ void setup() {
 
   sessionID = getFormattedTime("%Y-%m-%d_%H-%M-%S");
   sessionStartStr = getFormattedTime("%d/%m/%Y %H:%M:%S");
-  sessionMinutes = 0;
+  sessionSeconds = 0;
 
   // ส่งสถานะตอนเปิดเครื่องรอบนี้ทันที
-  updateFirebase(true);
+  updateFirebase(true, 0);
   lastUpdate = millis();
 }
 
@@ -221,9 +268,12 @@ void loop() {
     }
   }
 
-  // ส่งข้อมูลอัปเดตทุกๆ 1 นาที
-  if (millis() - lastUpdate >= updateInterval) {
-    lastUpdate = millis();
-    updateFirebase(false);
+  // ส่งข้อมูลอัปเดตทุกๆ 15 วินาที
+  unsigned long nowMillis = millis();
+  if (nowMillis - lastUpdate >= updateInterval) {
+    unsigned long deltaSec = (nowMillis - lastUpdate) / 1000UL;
+    if (deltaSec == 0) deltaSec = heartbeatIntervalSec;
+    lastUpdate = nowMillis;
+    updateFirebase(false, deltaSec);
   }
 }
