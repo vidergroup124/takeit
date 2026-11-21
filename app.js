@@ -154,7 +154,7 @@ const DEFAULT_PRODUCTS = [
     rentPricePerDay: 0,
     rentDeposit: 0,
     canHomeInstall: true,
-    installFee: 400,
+    installFee: 500,
     hourlyRate: 30,
     esp32DeviceId: 'ESP32-PS5-01',
     description: 'เครื่อง PS5 Slim รุ่นใส่แผ่นบลูเรย์ได้ ความจุ 1TB พร้อมจอย DualSense เลือกซื้อขาด หรือให้ทีมงานนำไปติดตั้งที่บ้าน คิดค่ารายชั่วโมงตามเวลาเปิดเครื่องจริงผ่านบอร์ด ESP32 Real-time',
@@ -172,7 +172,7 @@ const DEFAULT_PRODUCTS = [
     rentPricePerDay: 0,
     rentDeposit: 0,
     canHomeInstall: true,
-    installFee: 300,
+    installFee: 500,
     hourlyRate: 25,
     esp32DeviceId: 'ESP32-NSW-01',
     description: 'หน้าจอ OLED สีสดขนาด 7 นิ้ว เล่นได้ทั้งโหมดต่อทีวีและพกพา เลือกซื้อขาด หรือใช้บริการเช่าไปติดตั้งที่บ้าน คิดรายชั่วโมงตามจริงผ่านระบบ ESP32',
@@ -190,7 +190,7 @@ const DEFAULT_PRODUCTS = [
     rentPricePerDay: 0,
     rentDeposit: 0,
     canHomeInstall: true,
-    installFee: 400,
+    installFee: 500,
     hourlyRate: 30,
     esp32DeviceId: 'ESP32-XBOX-01',
     description: 'เครื่องคอนโซลขุมพลัง 12 TFLOPS รองรับ 4K 120FPS พร้อมจอยไร้สาย Xbox รองรับทั้งซื้อขาดและบริการเช่าติดตั้งที่บ้านคิดรายชั่วโมงผ่านบอร์ด ESP32',
@@ -446,9 +446,12 @@ function ensureProductGalleryImages(products) {
     const canHomeInstall = p.canHomeInstall !== undefined
       ? Boolean(p.canHomeInstall)
       : (def?.canHomeInstall !== undefined ? Boolean(def.canHomeInstall) : isConsole);
-    const installFee = p.installFee !== undefined && p.installFee !== ''
+    const rawInstallFee = p.installFee !== undefined && p.installFee !== ''
       ? Number(p.installFee)
-      : (def?.installFee ?? (isConsole ? 400 : 0));
+      : (def?.installFee ?? (isConsole ? 500 : 0));
+    const installFee = (canHomeInstall && (rawInstallFee === 300 || rawInstallFee === 400))
+      ? 500
+      : rawInstallFee;
     const hourlyRate = p.hourlyRate !== undefined && p.hourlyRate !== ''
       ? Number(p.hourlyRate)
       : (def?.hourlyRate ?? (isConsole ? 30 : 0));
@@ -642,6 +645,10 @@ async function loadInitialData() {
         state.products.forEach((p) => {
           if (p.category === 'console' && (p.shippingFee === 150 || p.shippingFee === '150')) {
             p.shippingFee = 200;
+            changed = true;
+          }
+          if ((p.category === 'console' || p.canHomeInstall) && (Number(p.installFee) === 300 || Number(p.installFee) === 400)) {
+            p.installFee = 500;
             changed = true;
           }
         });
@@ -1992,8 +1999,9 @@ function renderStorefront() {
             <span class="home-install-rate">⚡ ${formatTHB(p.hourlyRate)} / ชั่วโมง <span style="font-size:0.73rem; font-weight:500;">(คิดตามจริง Postpaid)</span></span>
           </div>
           <div style="text-align:end;">
-            <span class="home-install-fee">ค่าติดตั้งที่บ้าน <strong>${formatTHB(p.installFee)}</strong></span>
-            <span style="font-size:0.7rem; color:#38bdf8; display:block; cursor:pointer; text-decoration:underline;" data-open-esp32-meter="${escapeXml(p.esp32DeviceId || '')}">📡 กดเช็คชั่วโมงเครื่อง Real-time</span>
+            <span class="home-install-fee">ค่าติดตั้งเริ่มต้น <strong>${formatTHB(p.installFee)}</strong></span>
+            <span style="font-size:0.68rem; color:#a7f3d0; display:block;">(เฉพาะภาคกลาง • นอกพื้นที่บวกเพิ่มตามระยะทาง)</span>
+            <span style="font-size:0.7rem; color:#38bdf8; display:block; cursor:pointer; text-decoration:underline; margin-block-start:0.15rem;" data-open-esp32-meter="${escapeXml(p.esp32DeviceId || '')}">📡 กดเช็คชั่วโมงเครื่อง Real-time</span>
           </div>
         </div>
       `
@@ -2464,7 +2472,7 @@ function addToCartHomeInstall(productId) {
     return;
   }
 
-  const installFee = Number(product.installFee ?? 400);
+  const installFee = Number(product.installFee ?? 500);
   const hourlyRate = Number(product.hourlyRate ?? 30);
   const esp32DeviceId = product.esp32DeviceId || `ESP32-${String(product.platform || 'CON').toUpperCase()}-01`;
 
@@ -2492,7 +2500,7 @@ function addToCartHomeInstall(productId) {
 
   saveStateLocally();
   renderCartBadge();
-  showToast(`🏠 เพิ่มรายการเช่าติดตั้งที่บ้าน "${product.name}" (ค่าติดตั้ง ${formatTHB(installFee)} | เรท ${formatTHB(hourlyRate)}/ชม.) ลงตะกร้าแล้ว!`);
+  showToast(`🏠 เพิ่มรายการเช่าติดตั้งที่บ้าน "${product.name}" (ค่าติดตั้งเริ่มต้น ${formatTHB(installFee)} เฉพาะพื้นที่ภาคกลาง นอกพื้นที่บวกเพิ่มตามระยะทาง | เรท ${formatTHB(hourlyRate)}/ชม.) ลงตะกร้าแล้ว!`);
   openCartModal();
 }
 
@@ -2657,7 +2665,8 @@ function renderCartModalContents() {
             <span class="badge badge-emerald">🏠 เช่าเครื่องติดตั้งที่บ้าน + คิดรายชั่วโมงตามจริง (ESP32)</span>
             <h4 style="margin:0.25rem 0 0.15rem;">${escapeXml(item.name)} (${escapeXml(item.platform)})</h4>
             <div style="font-size:0.82rem; color:var(--text-secondary);">
-              ค่าติดตั้งเครื่องที่บ้าน: <strong style="color:#34d399;">${formatTHB(item.installFee)}</strong> × ${qty} เครื่อง = <strong>${formatTHB(installCost)}</strong>
+              ค่าติดตั้งเครื่องเริ่มต้น: <strong style="color:#34d399;">${formatTHB(item.installFee)}</strong> × ${qty} เครื่อง = <strong>${formatTHB(installCost)}</strong>
+              <span style="font-size:0.75rem; color:#a7f3d0; display:block;">(ราคาเริ่มต้น ฿500 เฉพาะพื้นที่ภาคกลาง หากนอกเหนือจากนี้จะบวกเพิ่มตามระยะทาง)</span>
             </div>
             <div style="font-size:0.78rem; color:#38bdf8;">
               📡 เรทรายชั่วโมง: <strong>${formatTHB(item.hourlyRate)}/ชั่วโมง</strong> (คิดตามเวลาเปิดเครื่องจริงผ่านบอร์ด ESP32 แบบ Postpaid เล่นก่อนจ่ายทีหลัง)
@@ -3138,7 +3147,7 @@ function openProductFormModal(productId = null) {
   document.getElementById('prod-rent-deposit').value = prod ? (prod.rentDeposit || 500) : 500;
 
   const canHome = prod ? Boolean(prod.canHomeInstall) : false;
-  const installVal = prod ? (prod.installFee ?? 400) : 400;
+  const installVal = prod ? (prod.installFee ?? 500) : 500;
   const hourlyVal = prod ? (prod.hourlyRate ?? 30) : 30;
   const devIdVal = prod ? (prod.esp32DeviceId || '') : '';
   const canHomeCheck = document.getElementById('prod-can-home-install');
@@ -4241,7 +4250,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const installInput = document.getElementById('esp32-install-fee-input');
       const hourlyInput = document.getElementById('esp32-hourly-rate-input');
       const devIdInput = document.getElementById('esp32-device-id-input');
-      if (installInput) installInput.value = prod.installFee ?? 400;
+      if (installInput) installInput.value = prod.installFee ?? 500;
       if (hourlyInput) hourlyInput.value = prod.hourlyRate ?? 30;
       if (devIdInput && !devIdInput.value.trim()) {
         devIdInput.value = prod.esp32DeviceId || `ESP32-${String(prod.platform || 'CON').toUpperCase()}-01`;
@@ -4595,7 +4604,7 @@ function buildOrderContractHtml(order, options = { unmasked: true, isDraft: fals
     ? `
       <div class="contract-section-title">${homeInstallClauseTitleNum}: ข้อตกลงการเช่าเครื่องคอนโซลติดตั้งที่บ้านและคิดค่าบริการรายชั่วโมงตามจริงผ่านระบบ ESP32 (Postpaid Hourly Meter)</div>
       <ol class="contract-clauses">
-        <li><strong>กรรมสิทธิ์และการติดตั้งเครื่องที่บ้าน:</strong> เครื่องเกมคอนโซล อุปกรณ์เสริม และสมาร์ทบอร์ด <strong>ESP32</strong> ที่นำไปติดตั้ง ณ ที่พักอาศัยของผู้เช่า ถือเป็นกรรมสิทธิ์ของ <strong>ร้าน TakeIT Gaming &amp; Console</strong> ตลอดอายุสัญญา โดยผู้เช่าได้ชำระค่าบริการติดตั้งเครื่องเริ่มต้นจำนวน <strong>${formatTHB(computedInstallTotal)}</strong> เรียบร้อยแล้ว</li>
+        <li><strong>กรรมสิทธิ์และการติดตั้งเครื่องที่บ้าน:</strong> เครื่องเกมคอนโซล อุปกรณ์เสริม และสมาร์ทบอร์ด <strong>ESP32</strong> ที่นำไปติดตั้ง ณ ที่พักอาศัยของผู้เช่า ถือเป็นกรรมสิทธิ์ของ <strong>ร้าน TakeIT Gaming &amp; Console</strong> ตลอดอายุสัญญา โดยผู้เช่าได้ชำระค่าบริการติดตั้งเครื่องเริ่มต้นจำนวน <strong>${formatTHB(computedInstallTotal)}</strong> เรียบร้อยแล้ว <strong>(ทั้งนี้ อัตราค่าติดตั้งเริ่มต้น 500 บาท สำหรับพื้นที่ภาคกลางเท่านั้น หากสถานที่ติดตั้งอยู่นอกเหนือจากพื้นที่ภาคกลาง จะคิดค่าบริการติดตั้งบวกเพิ่มตามระยะทางจริง)</strong></li>
         <li><strong>การนับชั่วโมงใช้งานจริงแบบ Real-time และการชำระเงินรายวัน (Postpaid Daily Billing):</strong> คู่สัญญาตกลงให้ใช้ข้อมูลเวลาเปิดใช้งานเครื่องจากสมาร์ทบอร์ด <strong>ESP32</strong> ที่เชื่อมต่อกับตัวเครื่องคอนโซลเป็นเกณฑ์ในการคำนวณค่าเช่ารายชั่วโมงตามอัตราที่ระบุไว้ในตารางข้อที่ 1 โดยผู้เช่าสามารถตรวจสอบชั่วโมงใช้งานและยอดเงินสะสมของเครื่องตนเองได้แบบเรียลไทม์ผ่านเว็บไซต์ของร้าน และตกลงชำระค่าบริการรายชั่วโมง<strong>แบบวันต่อวัน โดยทางร้านจะติดต่อไปเก็บค่าบริการจากผู้เช่าในช่วงเวลาประมาณ 20.00 น. ของทุกวัน</strong> (หรือเมื่อสิ้นสุดการเช่า) ตามจำนวนชั่วโมงและนาทีที่ใช้งานจริงในรอบวันนั้นๆ</li>
         <li><strong>การแจ้งขอคืนเครื่องคอนโซลโดยลูกค้า:</strong> <strong>หากลูกค้ามีความประสงค์จะขอคืนเครื่องคอนโซล ให้ติดต่อแจ้งมายังทางร้านผ่านเบอร์โทรศัพท์ <span style="color:#0284c7;">0826716780</span></strong> เพื่อนัดหมายวัน-เวลาในการเข้ารับเครื่องคืนและสรุปยอดค่าบริการรายชั่วโมงสะสมตามจริง</li>
         <li><strong style="color:#b91c1c;">เงื่อนไขกรณีทางร้านขอคืนเครื่องคอนโซล (แจ้งเหตุผลล่วงหน้าและรับคืนที่บ้านฟรี):</strong> <strong>หากทางร้านมีความจำเป็นต้องขอคืนเครื่องคอนโซล ผู้เช่าจะต้องส่งมอบเครื่องคืนให้แก่ทางร้าน โดยทางร้านจะเดินทางไปรับเครื่องคืนถึงบ้านลูกค้าโดยไม่เสียค่าบริการใดๆ ทั้งสิ้น</strong> ทั้งนี้ การขอคืนเครื่องจะมีเหตุผลอันสมควร โดย<strong>ทางร้านจะติดต่อหาลูกค้าเพื่อแจ้งให้ทราบล่วงหน้าว่าจะขอคืนตัวคอนโซล พร้อมอธิบายเหตุผลให้ลูกค้าทราบอย่างชัดเจน</strong> รวมถึงกรณีที่ลูกค้านำเครื่องไปใช้เช่ารายชั่วโมงแล้วหยุดใช้เครื่องติดต่อกันเป็นเวลาเกิน 2 วัน (48 ชั่วโมง) ทางร้านขอติดต่อนำเครื่องคืนเพื่อไม่ให้เสียโอกาสของลูกค้าคนอื่นที่รอเครื่อง โดยอ้างอิงจากเวลาเปิดใช้งานล่าสุด (Last Active) ในระบบสมาร์ทบอร์ด ESP32 และผู้เช่าตกลงให้ความร่วมมือในการส่งมอบเครื่องคืนพร้อมชำระค่าบริการรายชั่วโมงสะสมตามจริง</li>
@@ -4741,7 +4750,7 @@ function buildOrderContractPlainText(order, unmasked = true) {
       return `${idx + 1}. [เช่าแผ่น ${item.rentDays} วัน] ${item.name} (${item.platform}) x${item.qty} | ค่าเช่า ${formatTHB(item.rentRate * item.rentDays * item.qty)} + มัดจำแผ่น ${formatTHB(item.deposit * item.qty)} + ค่าส่ง ${shipStr} | เริ่มเช่า: ${formatThaiDate(item.rentStartDate)} -> กำหนดส่งคืน: ${formatThaiDate(item.rentEndDate)}`;
     }
     if (item.mode === 'home_install') {
-      return `${idx + 1}. [เช่าเครื่องติดตั้งที่บ้าน + บอร์ด ESP32] ${item.name} (${item.platform}) x${item.qty} | ค่าติดตั้ง ${formatTHB((item.installFee || 0) * item.qty)} | เรทรายชั่วโมง ${formatTHB(item.hourlyRate || 0)}/ชม. (คิดตามจริงผ่านบอร์ด ${item.esp32DeviceId || 'ESP32'})`;
+      return `${idx + 1}. [เช่าเครื่องติดตั้งที่บ้าน + บอร์ด ESP32] ${item.name} (${item.platform}) x${item.qty} | ค่าติดตั้งเริ่มต้น ${formatTHB((item.installFee || 0) * item.qty)} (฿500 เฉพาะพื้นที่ภาคกลาง หากนอกเหนือจากนี้บวกเพิ่มตามระยะทาง) | เรทรายชั่วโมง ${formatTHB(item.hourlyRate || 0)}/ชม. (คิดตามจริงผ่านบอร์ด ${item.esp32DeviceId || 'ESP32'})`;
     }
     return `${idx + 1}. [ซื้อขาด] ${item.name} (${item.platform}) x${item.qty} | ราคา ${formatTHB(item.price * item.qty)} + ค่าส่ง ${shipStr}`;
   }).join('\n');
@@ -4761,14 +4770,14 @@ function buildOrderContractPlainText(order, unmasked = true) {
     itemLines,
     `------------------------------------------------`,
     `รวมค่าซื้อสินค้า: ${formatTHB(order?.buySubtotal || 0)}`,
-    ...(Number(order?.installSubtotal || 0) > 0 ? [`รวมค่าติดตั้งเครื่องคอนโซลที่บ้าน: ${formatTHB(order?.installSubtotal || 0)}`] : []),
+    ...(Number(order?.installSubtotal || 0) > 0 ? [`รวมค่าติดตั้งเครื่องคอนโซลเริ่มต้น: ${formatTHB(order?.installSubtotal || 0)} (ราคา 500 บาทเฉพาะพื้นที่ภาคกลาง หากนอกเหนือจากนี้จะบวกเพิ่มตามระยะทาง)`] : []),
     `รวมค่าเช่าแผ่นเกม: ${formatTHB(order?.rentSubtotal || 0)}`,
     `รวมเงินมัดจำแผ่นเกม (ได้รับคืน 100% เมื่อคืนแผ่นปกติ): ${formatTHB(order?.depositSubtotal || 0)}`,
     `ค่าจัดส่งรวมตามรายการสินค้า: ${formatTHB(order?.shippingFee ?? 0)}`,
     `รวมยอดชำระสุทธิทั้งสิ้น: ${formatTHB(order?.grandTotal || 0)}`,
     `------------------------------------------------`,
     ...(meta.hasHomeInstall ? [
-      `เงื่อนไขการเช่าเครื่องติดบ้านรายชั่วโมง (ESP32): คิดค่ารายชั่วโมงตามเวลาเปิดเครื่องจริงแบบวันต่อวัน (Postpaid) โดยทางร้านจะติดต่อไปแจ้งยอดและเก็บค่าเช่ารายชั่วโมงในช่วงเวลาประมาณ 20.00 น. ของทุกวัน`,
+      `เงื่อนไขการเช่าเครื่องติดบ้านรายชั่วโมง (ESP32): ค่าติดตั้งเริ่มต้น 500 บาท (เฉพาะพื้นที่ภาคกลาง หากนอกเหนือจากนี้จะบวกเพิ่มตามระยะทาง) และคิดค่ารายชั่วโมงตามเวลาเปิดเครื่องจริงแบบวันต่อวัน (Postpaid) โดยทางร้านจะติดต่อไปแจ้งยอดและเก็บค่าเช่ารายชั่วโมงในช่วงเวลาประมาณ 20.00 น. ของทุกวัน`,
       `- การขอคืนเครื่องโดยลูกค้า: หากลูกค้าต้องการขอคืนเครื่องคอนโซล ให้ติดต่อมาทางเบอร์โทรศัพท์ 0826716780`,
       `- การขอคืนเครื่องโดยทางร้าน: หากทางร้านขอคืนเครื่อง ลูกค้าจะต้องคืนเครื่องให้แก่ทางร้าน โดยทางร้านจะเดินทางไปรับคืนที่บ้านลูกค้าโดยไม่เสียค่าบริการใดๆ ทั้งนี้ การขอคืนเครื่องจะมีเหตุผล โดยทางร้านจะติดต่อแจ้งลูกค้าล่วงหน้าพร้อมอธิบายเหตุผลให้ทราบอย่างชัดเจน (รวมถึงกรณีหยุดใช้งานเครื่องเกิน 2 วัน หรือ 48 ชั่วโมง ทางร้านขอติดต่อนำเครื่องคืนเพื่อไม่ให้เสียโอกาสของลูกค้าท่านอื่นที่รอเครื่อง)`
     ] : []),
@@ -5559,7 +5568,7 @@ function normalizeEsp32SessionRecord(raw, docId = '') {
     productId: raw.productId || 'PROD-PS5-SLIM',
     consoleName: raw.consoleName || (raw.name && raw.name !== deviceId ? raw.name : `เครื่องคอนโซล (${deviceId})`),
     platform: inferredPlatform,
-    installFee: Number(raw.installFee ?? 400),
+    installFee: (Number(raw.installFee) === 300 || Number(raw.installFee) === 400) ? 500 : Number(raw.installFee ?? 500),
     hourlyRate: Number(raw.hourlyRate ?? 30),
     customerName: raw.customerName || raw.customer?.name || 'ลูกค้าบริการติดตั้งที่บ้าน',
     customerPhone: raw.customerPhone || raw.customer?.phone || '',
@@ -5685,7 +5694,7 @@ async function createOrUpdateEsp32SessionFromOrder(order, item) {
     productId: item.productId,
     consoleName: item.name,
     platform: item.platform,
-    installFee: Number(item.installFee ?? 400),
+    installFee: Number(item.installFee ?? 500),
     hourlyRate: Number(item.hourlyRate ?? 30),
     customerName: order.customer?.name || '',
     customerPhone: order.customer?.phone || '',
@@ -5793,8 +5802,9 @@ function renderHomeConsoleServiceCatalog() {
         </div>
         <div class="home-install-box" style="margin-block-start:auto;">
           <div>
-            <span style="font-size:0.74rem; color:#a7f3d0; display:block;">ค่าติดตั้งเครื่องที่บ้าน:</span>
+            <span style="font-size:0.74rem; color:#a7f3d0; display:block;">ค่าติดตั้งเครื่องเริ่มต้น:</span>
             <strong style="font-size:1rem; color:#f8fafc;">${formatTHB(p.installFee)}</strong>
+            <span style="font-size:0.68rem; color:#a7f3d0; display:block;">(เฉพาะพื้นที่ภาคกลาง • นอกพื้นที่บวกเพิ่มตามระยะทาง)</span>
           </div>
           <div style="text-align:end;">
             <span style="font-size:0.74rem; color:#a7f3d0; display:block;">คิดรายชั่วโมงตามจริง (Postpaid):</span>
@@ -5804,7 +5814,7 @@ function renderHomeConsoleServiceCatalog() {
         <div style="display:flex; gap:0.45rem; flex-wrap:wrap;">
           ${isReady
             ? `<button type="button" class="btn btn-emerald btn-sm" style="flex:1;" data-modal-book-home-install="${p.id}">
-                🏠 จองติดตั้งเครื่องนี้ที่บ้าน (${formatTHB(p.installFee)})
+                🏠 จองติดตั้งที่บ้าน (เริ่มต้น ${formatTHB(p.installFee)})
               </button>`
             : `<button type="button" class="btn btn-outline btn-sm" style="flex:1;" disabled>❌ คิวเครื่องเต็มชั่วคราว</button>`
           }
@@ -5848,7 +5858,7 @@ function getAllSearchableEsp32Sessions() {
       productId: p.id,
       consoleName: p.name,
       platform: p.platform,
-      installFee: Number(p.installFee ?? 400),
+      installFee: Number(p.installFee ?? 500),
       hourlyRate: Number(p.hourlyRate ?? 30),
       customerName: 'พร้อมเชื่อมบอร์ด ESP32 ของลูกค้า',
       customerPhone: '',
@@ -5948,7 +5958,7 @@ function renderEsp32LiveMeterResults(rawQuery = '') {
             <h3 style="margin:0.4rem 0 0.15rem; font-size:1.1rem; color:var(--text-primary);">${escapeXml(s.consoleName)}</h3>
             <div style="font-size:0.82rem; color:var(--text-secondary);">
               👤 ผู้เช่าติดตั้งที่บ้าน: <strong>${escapeXml(custDisplay)}</strong>
-              • ค่าติดตั้งเริ่มต้น: <strong style="color:#6ee7b7;">${formatTHB(s.installFee)}</strong>
+              • ค่าติดตั้งเริ่มต้น: <strong style="color:#6ee7b7;">${formatTHB(s.installFee)}</strong> <span style="font-size:0.74rem; color:#a7f3d0;">(เฉพาะภาคกลาง • นอกพื้นที่บวกเพิ่มตามระยะทาง)</span>
             </div>
           </div>
 
@@ -6180,7 +6190,7 @@ function renderAdminEsp32Sessions() {
           <div class="esp32-readout-box">
             <div style="font-size:0.75rem; color:var(--text-muted);">ยอดเรียกเก็บรายชั่วโมง (Postpaid)</div>
             <div class="esp32-digital-cost" data-esp32-cost="${escapeXml(s.id)}">${stats.liveCostFormatted}</div>
-            <div style="font-size:0.78rem; color:#6ee7b7;">เรท ${formatTHB(s.hourlyRate)}/ชม. | ค่าติดตั้งเริ่มต้น ${formatTHB(s.installFee)}</div>
+            <div style="font-size:0.78rem; color:#6ee7b7;">เรท ${formatTHB(s.hourlyRate)}/ชม. | ค่าติดตั้งเริ่มต้น ${formatTHB(s.installFee)} (เฉพาะภาคกลาง)</div>
           </div>
         </div>
 
@@ -6320,7 +6330,7 @@ function openAdminEsp32SessionModal(sessionId = null) {
   if (consoleSelect && (sess?.productId || defaultProd?.id)) {
     consoleSelect.value = sess?.productId || defaultProd?.id;
   }
-  document.getElementById('esp32-install-fee-input').value = sess ? sess.installFee : (defaultProd?.installFee ?? 400);
+  document.getElementById('esp32-install-fee-input').value = sess ? sess.installFee : (defaultProd?.installFee ?? 500);
   document.getElementById('esp32-hourly-rate-input').value = sess ? sess.hourlyRate : (defaultProd?.hourlyRate ?? 30);
   document.getElementById('esp32-cust-name-input').value = sess ? sess.customerName : '';
   document.getElementById('esp32-cust-phone-input').value = sess ? sess.customerPhone : '';
@@ -6419,7 +6429,7 @@ function openEsp32SessionContract(sessionId, autoPrint = false, unmasked = true)
         name: `${s.consoleName} (ชั่วโมงสะสมปัจจุบัน: ${stats.readableDuration} = ${stats.liveCostFormatted})`,
         platform: s.platform || 'PS5',
         mode: 'home_install',
-        installFee: Number(s.installFee ?? 400),
+        installFee: Number(s.installFee ?? 500),
         hourlyRate: Number(s.hourlyRate ?? 30),
         esp32DeviceId: s.deviceId,
         shippingFee: 0,
@@ -6427,11 +6437,11 @@ function openEsp32SessionContract(sessionId, autoPrint = false, unmasked = true)
       }
     ],
     buySubtotal: 0,
-    installSubtotal: Number(s.installFee ?? 400),
+    installSubtotal: Number(s.installFee ?? 500),
     rentSubtotal: 0,
     depositSubtotal: 0,
     shippingFee: 0,
-    grandTotal: Number(s.installFee ?? 400),
+    grandTotal: Number(s.installFee ?? 500),
     status: stats.isOnline ? 'กำลังเช่าติดตั้งที่บ้าน (ONLINE)' : 'ติดตั้งที่บ้านแล้ว (STANDBY)'
   };
 
