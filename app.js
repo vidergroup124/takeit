@@ -338,6 +338,10 @@ let state = {
   activePlatform: 'all',
   activeMode: 'all',
   searchQuery: '',
+  adminProductSearch: '',
+  adminProductCategory: 'all',
+  adminProductPlatform: 'all',
+  adminProductStatus: 'all',
   pendingSlipDataUrl: '',
   pendingIssueImageDataUrl: '',
   editingProductImages: [],
@@ -2976,7 +2980,42 @@ function renderAdminProductsTable() {
   const tbody = document.getElementById('admin-products-tbody');
   if (!tbody) return;
 
-  tbody.innerHTML = state.products.map((p) => {
+  const q = String(state.adminProductSearch || '').trim().toLowerCase();
+  const catFilter = state.adminProductCategory || 'all';
+  const platFilter = state.adminProductPlatform || 'all';
+  const statusFilter = state.adminProductStatus || 'all';
+
+  const filtered = (state.products || []).filter((p) => {
+    if (catFilter !== 'all' && p.category !== catFilter) return false;
+    if (platFilter !== 'all' && p.platform !== platFilter) return false;
+    if (statusFilter !== 'all' && p.status !== statusFilter) return false;
+    if (q) {
+      const haystack = `${p.name || ''} ${p.id || ''} ${p.platform || ''} ${getCategoryLabel(p.category)} ${p.esp32DeviceId || ''} ${p.description || ''}`.toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+    return true;
+  });
+
+  const countBadge = document.getElementById('admin-products-count-badge');
+  if (countBadge) {
+    const total = (state.products || []).length;
+    countBadge.textContent = filtered.length === total
+      ? `ทั้งหมด ${total} รายการ`
+      : `แสดง ${filtered.length} จาก ${total} รายการ`;
+  }
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="7" style="text-align:center; padding:2rem; color:var(--text-muted);">
+          🔍 ไม่พบสินค้าที่ตรงกับคำค้นหาหรือตัวกรองที่เลือก
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = filtered.map((p) => {
     const imgs = getProductImages(p);
     const rentParts = [];
     if (p.canRent) {
@@ -4195,6 +4234,39 @@ document.addEventListener('DOMContentLoaded', () => {
     if (state.isAdmin) renderAdminSupportTicketsTable();
 
     showToast(`📨 ส่งแจ้งปัญหาเรียบร้อยแล้ว! (รหัสรายการ: ${ticketId}) เจ้าหน้าที่จะรีบติดต่อกลับเพื่อดูแลให้ครับ`);
+  });
+
+  // Admin Product Search & Category/Platform/Status Filters
+  document.getElementById('admin-product-search')?.addEventListener('input', (e) => {
+    state.adminProductSearch = e.target.value || '';
+    renderAdminProductsTable();
+  });
+  document.getElementById('admin-product-filter-category')?.addEventListener('change', (e) => {
+    state.adminProductCategory = e.target.value || 'all';
+    renderAdminProductsTable();
+  });
+  document.getElementById('admin-product-filter-platform')?.addEventListener('change', (e) => {
+    state.adminProductPlatform = e.target.value || 'all';
+    renderAdminProductsTable();
+  });
+  document.getElementById('admin-product-filter-status')?.addEventListener('change', (e) => {
+    state.adminProductStatus = e.target.value || 'all';
+    renderAdminProductsTable();
+  });
+  document.getElementById('btn-admin-product-clear-filter')?.addEventListener('click', () => {
+    state.adminProductSearch = '';
+    state.adminProductCategory = 'all';
+    state.adminProductPlatform = 'all';
+    state.adminProductStatus = 'all';
+    const searchEl = document.getElementById('admin-product-search');
+    const catEl = document.getElementById('admin-product-filter-category');
+    const platEl = document.getElementById('admin-product-filter-platform');
+    const statEl = document.getElementById('admin-product-filter-status');
+    if (searchEl) searchEl.value = '';
+    if (catEl) catEl.value = 'all';
+    if (platEl) platEl.value = 'all';
+    if (statEl) statEl.value = 'all';
+    renderAdminProductsTable();
   });
 
   // Admin Support Filters & Actions

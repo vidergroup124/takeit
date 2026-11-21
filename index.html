@@ -230,6 +230,48 @@
 
       <!-- Admin Tab 2: Products Management -->
       <div id="admin-tab-products" class="admin-tab-content" hidden>
+        <div class="highlight-box"
+          style="margin-block-end:0.9rem; padding:0.85rem 1rem; border-color:rgba(56,189,248,0.3); background:rgba(15,23,42,0.6);">
+          <div style="display:flex; gap:0.65rem; align-items:center; flex-wrap:wrap;">
+            <input type="search" id="admin-product-search"
+              placeholder="🔍 ค้นหาชื่อสินค้า, รหัสสินค้า (ID), บอร์ด ESP32 หรือรายละเอียด..."
+              aria-label="ค้นหาสินค้าในหน้าแอดมิน"
+              style="flex:1; min-inline-size:220px;">
+
+            <select id="admin-product-filter-category" aria-label="กรองตามหมวดหมู่สินค้า" style="inline-size:auto;">
+              <option value="all">📂 ทุกหมวดหมู่</option>
+              <option value="disc">💿 แผ่นเกมคอนโซล</option>
+              <option value="console">🕹️ เครื่องเกมคอนโซล</option>
+              <option value="it_other">🎧 อุปกรณ์เกมมิ่ง &amp; IT</option>
+            </select>
+
+            <select id="admin-product-filter-platform" aria-label="กรองตามแพลตฟอร์ม" style="inline-size:auto;">
+              <option value="all">🎮 ทุกแพลตฟอร์ม</option>
+              <option value="PS5">PS5</option>
+              <option value="PS4">PS4</option>
+              <option value="Switch">Switch</option>
+              <option value="Xbox">Xbox</option>
+              <option value="Handheld">Handheld</option>
+              <option value="IT">IT / Gear</option>
+            </select>
+
+            <select id="admin-product-filter-status" aria-label="กรองตามสถานะสินค้า" style="inline-size:auto;">
+              <option value="all">📌 ทุกสถานะ</option>
+              <option value="ready">✅ พร้อมขาย/เช่า</option>
+              <option value="coming_soon">⏳ เร็วๆ นี้</option>
+              <option value="out_of_stock">❌ สินค้าหมด</option>
+            </select>
+
+            <button type="button" class="btn btn-outline btn-sm" id="btn-admin-product-clear-filter">
+              🔄 ล้างตัวกรอง
+            </button>
+
+            <span id="admin-products-count-badge" class="badge badge-cyan" style="font-size:0.78rem;">
+              แสดง 0 รายการ
+            </span>
+          </div>
+        </div>
+
         <div tabindex="0" role="region" aria-labelledby="products-table-caption" class="table-wrapper">
           <table class="data-table" id="admin-products-table"
             style="--label-2:'หมวดหมู่ / แพลตฟอร์ม'; --label-3:'ราคาขายขาด'; --label-4:'ราคาเช่า/วัน & มัดจำ'; --label-5:'สต็อก'; --label-6:'สถานะการแสดง'; --label-7:'จัดการ';">
@@ -1683,7 +1725,7 @@
 
   <!-- HEIC/HEIF image decoder for Apple iPhone photos in Chrome & other browsers -->
   <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js" defer></script>
-  <script src="app.js?v=20261122-esp32-13" defer></script>
+  <script src="app.js?v=20261122-esp32-14" defer></script>
 </body>
 
 </html>
