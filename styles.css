@@ -574,6 +574,17 @@ table.data-table tbody tr:hover th {
   color: #fff;
 }
 
+.btn-amber {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #0f172a;
+  font-weight: 700;
+  box-shadow: 0 4px 16px rgba(245, 158, 11, 0.32);
+}
+
+.btn-amber:hover {
+  background: linear-gradient(135deg, #fbbf24, #f59e0b);
+}
+
 .btn-outline {
   background: rgba(15, 23, 42, 0.7);
   border-color: var(--border-subtle);
@@ -2300,6 +2311,63 @@ table.data-table tbody tr:hover th {
 .home-install-fee {
   font-size: 0.76rem;
   color: #a7f3d0;
+}
+
+.daily-console-box {
+  background: rgba(245, 158, 11, 0.11);
+  border: 1px solid rgba(245, 158, 11, 0.42);
+  border-radius: var(--radius-sm);
+  padding: 0.55rem 0.72rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.daily-console-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.daily-console-rate {
+  font-weight: 800;
+  color: #fcd34d;
+  font-size: 0.94rem;
+}
+
+.daily-promo-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.daily-promo-pill {
+  font-size: 0.71rem;
+  font-weight: 700;
+  color: #fef3c7;
+  background: rgba(245, 158, 11, 0.22);
+  border: 1px solid rgba(251, 191, 36, 0.45);
+  border-radius: 999px;
+  padding: 0.12rem 0.5rem;
+}
+
+.admin-promo-row {
+  display: grid;
+  grid-template-columns: 95px 125px 1fr auto;
+  gap: 0.45rem;
+  align-items: center;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: var(--radius-sm);
+  padding: 0.45rem 0.55rem;
+}
+
+@media (max-width: 600px) {
+  .admin-promo-row {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 
 .esp32-meter-card {

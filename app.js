@@ -139,6 +139,14 @@ const DEFAULT_PRODUCTS = [
     installFee: 500,
     hourlyRate: 35,
     esp32DeviceId: 'ESP32-PS5PRO-01',
+    canDailyConsoleRent: true,
+    consoleDailyRate: 350,
+    consoleDailyDeposit: 0,
+    consoleDailyPromos: [
+      { days: 3, price: 950, label: 'โปร 3 วันสุดคุ้ม' },
+      { days: 5, price: 1450, label: 'โปร 5 วันจัดเต็ม' },
+      { days: 7, price: 1890, label: 'โปร 7 วันรายสัปดาห์' }
+    ],
     description: 'เครื่องเกมคอนโซลรุ่นท็อป PS5 Pro ความจุ 2TB รองรับ PSSR AI Upscaling และ Ray Tracing ขั้นสูง เลือกซื้อขาด หรือใช้บริการนำเครื่องไปติดตั้งที่บ้าน (จ่ายค่าติดตั้ง + คิดรายชั่วโมงตามจริงผ่านบอร์ด ESP32 Real-time)',
     image: makeProductBannerSvg('PlayStation 5 Pro', '2TB SSD • ซื้อขาด / เช่าติดบ้านรายชั่วโมง', '#1e3a8a', '#172554', '🕹️')
   },
@@ -157,6 +165,14 @@ const DEFAULT_PRODUCTS = [
     installFee: 500,
     hourlyRate: 30,
     esp32DeviceId: 'ESP32-PS5-01',
+    canDailyConsoleRent: true,
+    consoleDailyRate: 290,
+    consoleDailyDeposit: 0,
+    consoleDailyPromos: [
+      { days: 3, price: 790, label: 'โปร 3 วันสุดคุ้ม' },
+      { days: 5, price: 1190, label: 'โปร 5 วันจัดเต็ม' },
+      { days: 7, price: 1490, label: 'โปร 7 วันรายสัปดาห์' }
+    ],
     description: 'เครื่อง PS5 Slim รุ่นใส่แผ่นบลูเรย์ได้ ความจุ 1TB พร้อมจอย DualSense เลือกซื้อขาด หรือให้ทีมงานนำไปติดตั้งที่บ้าน คิดค่ารายชั่วโมงตามเวลาเปิดเครื่องจริงผ่านบอร์ด ESP32 Real-time',
     image: makeProductBannerSvg('PS5 Slim Disc 1TB', 'ซื้อขาด / เช่าติดบ้าน ฿30/ชม. (ESP32)', '#2563eb', '#0f172a', '🎮')
   },
@@ -175,6 +191,14 @@ const DEFAULT_PRODUCTS = [
     installFee: 500,
     hourlyRate: 25,
     esp32DeviceId: 'ESP32-NSW-01',
+    canDailyConsoleRent: true,
+    consoleDailyRate: 190,
+    consoleDailyDeposit: 0,
+    consoleDailyPromos: [
+      { days: 3, price: 490, label: 'โปร 3 วันสุดคุ้ม' },
+      { days: 5, price: 750, label: 'โปร 5 วันจัดเต็ม' },
+      { days: 7, price: 990, label: 'โปร 7 วันรายสัปดาห์' }
+    ],
     description: 'หน้าจอ OLED สีสดขนาด 7 นิ้ว เล่นได้ทั้งโหมดต่อทีวีและพกพา เลือกซื้อขาด หรือใช้บริการเช่าไปติดตั้งที่บ้าน คิดรายชั่วโมงตามจริงผ่านระบบ ESP32',
     image: makeProductBannerSvg('Nintendo Switch OLED', 'ซื้อขาด / เช่าติดบ้าน ฿25/ชม. (ESP32)', '#be123c', '#4c0519', '🍄')
   },
@@ -193,6 +217,14 @@ const DEFAULT_PRODUCTS = [
     installFee: 500,
     hourlyRate: 30,
     esp32DeviceId: 'ESP32-XBOX-01',
+    canDailyConsoleRent: true,
+    consoleDailyRate: 290,
+    consoleDailyDeposit: 0,
+    consoleDailyPromos: [
+      { days: 3, price: 790, label: 'โปร 3 วันสุดคุ้ม' },
+      { days: 5, price: 1190, label: 'โปร 5 วันจัดเต็ม' },
+      { days: 7, price: 1490, label: 'โปร 7 วันรายสัปดาห์' }
+    ],
     description: 'เครื่องคอนโซลขุมพลัง 12 TFLOPS รองรับ 4K 120FPS พร้อมจอยไร้สาย Xbox รองรับทั้งซื้อขาดและบริการเช่าติดตั้งที่บ้านคิดรายชั่วโมงผ่านบอร์ด ESP32',
     image: makeProductBannerSvg('Xbox Series X 1TB', '4K 120FPS • ซื้อขาด / เช่าติดบ้านรายชั่วโมง', '#15803d', '#052e16', '🟢')
   },
@@ -345,6 +377,7 @@ let state = {
   pendingSlipDataUrl: '',
   pendingIssueImageDataUrl: '',
   editingProductImages: [],
+  editingConsolePromos: [],
   firestoreDb: null,
   firebaseModules: null,
   rtdb: null,
@@ -440,6 +473,52 @@ function getCartItemShippingFeePerUnit(item, preferSnapshot = false) {
   return Number(state.settings?.shippingFee ?? 60);
 }
 
+function normalizeConsoleDailyPromos(promos) {
+  if (!Array.isArray(promos)) return [];
+  const seenDays = new Map();
+  promos.forEach((pr) => {
+    const days = Math.floor(Number(pr?.days || 0));
+    const price = Math.max(0, Number(pr?.price ?? -1));
+    if (days >= 2 && !Number.isNaN(price) && price >= 0) {
+      seenDays.set(days, {
+        days,
+        price,
+        label: String(pr?.label || '').trim()
+      });
+    }
+  });
+  return Array.from(seenDays.values()).sort((a, b) => a.days - b.days);
+}
+
+function calculateConsoleDailyRentPrice(product, days) {
+  const safeDays = Math.max(1, Math.floor(Number(days) || 1));
+  const dailyRate = Math.max(0, Number(product?.consoleDailyRate ?? 0));
+  const regularPrice = dailyRate * safeDays;
+  const promos = normalizeConsoleDailyPromos(product?.consoleDailyPromos);
+  const matched = promos.find((pr) => pr.days === safeDays);
+  if (matched) {
+    const savings = Math.max(0, regularPrice - matched.price);
+    return {
+      days: safeDays,
+      dailyRate,
+      totalPrice: matched.price,
+      regularPrice,
+      savings,
+      isPromo: true,
+      promoLabel: matched.label || `โปรเหมา ${matched.days} วัน`
+    };
+  }
+  return {
+    days: safeDays,
+    dailyRate,
+    totalPrice: regularPrice,
+    regularPrice,
+    savings: 0,
+    isPromo: false,
+    promoLabel: ''
+  };
+}
+
 function ensureProductGalleryImages(products) {
   if (!Array.isArray(products)) return [];
   const defaultMap = new Map(DEFAULT_PRODUCTS.map((dp) => [dp.id, dp]));
@@ -462,12 +541,29 @@ function ensureProductGalleryImages(products) {
     const rawDevId = p.esp32DeviceId || def?.esp32DeviceId || (isConsole ? (String(p.platform || '').toUpperCase() === 'PS4' ? 'PS4_01' : `ESP32-${String(p.platform || 'CON').toUpperCase()}-01`) : '');
     const esp32DeviceId = (rawDevId === 'ESP32-PS4-01') ? 'PS4_01' : rawDevId;
 
+    const canDailyConsoleRent = p.canDailyConsoleRent !== undefined
+      ? Boolean(p.canDailyConsoleRent)
+      : (def?.canDailyConsoleRent !== undefined ? Boolean(def.canDailyConsoleRent) : false);
+    const consoleDailyRate = p.consoleDailyRate !== undefined && p.consoleDailyRate !== ''
+      ? Number(p.consoleDailyRate)
+      : (def?.consoleDailyRate ?? (isConsole ? 290 : 0));
+    const consoleDailyDeposit = p.consoleDailyDeposit !== undefined && p.consoleDailyDeposit !== ''
+      ? Number(p.consoleDailyDeposit)
+      : (def?.consoleDailyDeposit ?? 0);
+    const consoleDailyPromos = Array.isArray(p.consoleDailyPromos)
+      ? normalizeConsoleDailyPromos(p.consoleDailyPromos)
+      : normalizeConsoleDailyPromos(def?.consoleDailyPromos || []);
+
     return {
       ...p,
       canHomeInstall,
       installFee,
       hourlyRate,
       esp32DeviceId,
+      canDailyConsoleRent,
+      consoleDailyRate,
+      consoleDailyDeposit,
+      consoleDailyPromos,
       shippingFee: getProductShippingFee(p),
       image: cleaned[0],
       images: cleaned
@@ -1904,10 +2000,13 @@ function renderStorefront() {
   const filtered = state.products.filter((p) => {
     if (state.activeCategory === 'home_console') {
       if (!p.canHomeInstall) return false;
+    } else if (state.activeCategory === 'daily_console') {
+      if (!p.canDailyConsoleRent) return false;
     } else if (state.activeCategory !== 'all' && p.category !== state.activeCategory) {
       return false;
     }
     if (state.activePlatform !== 'all' && p.platform !== state.activePlatform) return false;
+    if (state.activeMode === 'daily_console_available' && !p.canDailyConsoleRent) return false;
     if (state.activeMode === 'home_install_available' && !p.canHomeInstall) return false;
     if (state.activeMode === 'rent_available' && !p.canRent) return false;
     if (state.activeMode === 'ready' && p.status !== 'ready') return false;
@@ -2011,6 +2110,29 @@ function renderStorefront() {
       `
       : '';
 
+    const dailyConsolePromos = normalizeConsoleDailyPromos(p.consoleDailyPromos);
+    const dailyConsoleSectionHtml = p.canDailyConsoleRent
+      ? `
+        <div class="daily-console-box">
+          <div class="daily-console-header">
+            <div>
+              <span style="font-size:0.74rem; color:#fde68a; display:block;">📅 เช่าเครื่องเหมารายวัน (ฟรีค่าติดตั้ง):</span>
+              <span class="daily-console-rate">🔥 ${formatTHB(p.consoleDailyRate)} / วัน</span>
+            </div>
+            <div style="text-align:end;">
+              <span style="font-size:0.74rem; color:#34d399; font-weight:700; display:block;">🎉 ไม่มีค่าติดตั้งเครื่อง (฿0)</span>
+              <span style="font-size:0.69rem; color:#fde68a; display:block;">${Number(p.consoleDailyDeposit || 0) > 0 ? `มัดจำเครื่อง ${formatTHB(p.consoleDailyDeposit)} (คืน 100%)` : 'ไม่เก็บค่ามัดจำเพิ่ม'}</span>
+            </div>
+          </div>
+          ${dailyConsolePromos.length > 0 ? `
+            <div class="daily-promo-pills">
+              ${dailyConsolePromos.map((pr) => `<span class="daily-promo-pill">🏷️ ${pr.days} วัน ${formatTHB(pr.price)}</span>`).join('')}
+            </div>
+          ` : ''}
+        </div>
+      `
+      : '';
+
     let actionButtonsHtml = '';
     if (isComingSoon) {
       actionButtonsHtml = `
@@ -2031,10 +2153,13 @@ function renderStorefront() {
       const rentBtn = p.canRent
         ? `<button type="button" class="btn btn-rent" data-rent-id="${p.id}">💿 เช่าแผ่นรายวัน</button>`
         : '';
+      const dailyConsoleBtn = p.canDailyConsoleRent
+        ? `<button type="button" class="btn btn-amber" data-daily-console-id="${p.id}">📅 เช่าเหมารายวัน ${formatTHB(p.consoleDailyRate)}/วัน</button>`
+        : '';
       const homeInstallBtn = p.canHomeInstall
         ? `<button type="button" class="btn btn-emerald" data-home-install-id="${p.id}">🏠 เช่าติดบ้าน ${formatTHB(p.hourlyRate)}/ชม.</button>`
         : '';
-      actionButtonsHtml = buyBtn + rentBtn + homeInstallBtn;
+      actionButtonsHtml = buyBtn + rentBtn + dailyConsoleBtn + homeInstallBtn;
     }
 
     return `
@@ -2065,6 +2190,7 @@ function renderStorefront() {
               <strong style="color:${getProductShippingFee(p) === 0 ? '#34d399' : '#38bdf8'};">${getProductShippingFee(p) === 0 ? 'ส่งฟรี! (฿0)' : `${formatTHB(getProductShippingFee(p))} / ชิ้น`}</strong>
             </div>
             ${homeInstallSectionHtml}
+            ${dailyConsoleSectionHtml}
             ${rentSectionHtml}
           </div>
 
@@ -2100,6 +2226,13 @@ function renderStorefront() {
     btn.addEventListener('click', () => {
       const prodId = btn.getAttribute('data-rent-id');
       openRentalCalculatorModal(prodId);
+    });
+  });
+
+  grid.querySelectorAll('[data-daily-console-id]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const prodId = btn.getAttribute('data-daily-console-id');
+      openConsoleDailyRentalModal(prodId);
     });
   });
 
@@ -2294,7 +2427,7 @@ function openProductGalleryModal(productId, startIndex = 0) {
 }
 
 // ============================================================================
-// Daily Game Disc Rental Calculator Modal
+// Daily Game Disc & Flat-Rate Console Rental Calculator Modal
 // ============================================================================
 function openRentalCalculatorModal(productId) {
   const product = state.products.find((p) => p.id === productId);
@@ -2302,6 +2435,11 @@ function openRentalCalculatorModal(productId) {
 
   const dialog = document.getElementById('dialog-rental-calc');
   document.getElementById('rent-modal-product-id').value = product.id;
+  const modeEl = document.getElementById('rent-modal-mode');
+  if (modeEl) modeEl.value = 'rent';
+
+  const titleEl = document.getElementById('rental-dialog-title');
+  if (titleEl) titleEl.textContent = '💿 เลือกจำนวนวันเช่าแผ่นเกม';
 
   const summaryEl = document.getElementById('rent-modal-product-summary');
   summaryEl.innerHTML = `
@@ -2314,6 +2452,41 @@ function openRentalCalculatorModal(productId) {
       </div>
     </div>
   `;
+
+  const presetsWrap = document.getElementById('rent-day-presets');
+  if (presetsWrap) {
+    presetsWrap.innerHTML = `
+      <button type="button" class="preset-chip" data-days="3">3 วัน</button>
+      <button type="button" class="preset-chip active" data-days="7" autofocus>7 วัน (ยอดนิยม)</button>
+      <button type="button" class="preset-chip" data-days="10">10 วัน</button>
+      <button type="button" class="preset-chip" data-days="15">15 วัน</button>
+      <button type="button" class="preset-chip" data-days="30">30 วัน</button>
+    `;
+  }
+
+  const installRow = document.getElementById('calc-install-fee-row');
+  if (installRow) installRow.hidden = true;
+  const returnShipRow = document.getElementById('calc-return-ship-row');
+  if (returnShipRow) returnShipRow.hidden = false;
+  const startLabel = document.getElementById('rent-start-date-label');
+  if (startLabel) startLabel.textContent = 'วันที่ต้องการเริ่มเช่า / รับแผ่น';
+  const qtyLabel = document.getElementById('rent-qty-label');
+  if (qtyLabel) qtyLabel.textContent = 'จำนวนแผ่น';
+  const rateLabel = document.getElementById('calc-rate-label');
+  if (rateLabel) rateLabel.textContent = 'ราคาเช่าต่อวัน:';
+  const daysLabel = document.getElementById('calc-days-label');
+  if (daysLabel) daysLabel.textContent = 'จำนวนวันเช่า × จำนวนแผ่น:';
+  const feeLabel = document.getElementById('calc-rent-fee-label');
+  if (feeLabel) feeLabel.textContent = 'รวมค่าเช่าแผ่นเกม:';
+  const depLabel = document.getElementById('calc-deposit-label');
+  if (depLabel) depLabel.textContent = 'ค่ามัดจำแผ่นเกม (ได้รับคืนเต็มจำนวนเมื่อคืนแผ่น):';
+  const retLabel = document.getElementById('calc-return-date-label');
+  if (retLabel) retLabel.textContent = 'กำหนดวันส่งคืนแผ่น:';
+  const submitBtn = document.getElementById('rent-modal-submit-btn');
+  if (submitBtn) {
+    submitBtn.className = 'btn btn-rent';
+    submitBtn.textContent = '💿 เพิ่มรายการเช่าแผ่นลงตะกร้า';
+  }
 
   const daysInput = document.getElementById('rent-days-input');
   const startDateInput = document.getElementById('rent-start-date');
@@ -2331,9 +2504,97 @@ function openRentalCalculatorModal(productId) {
   startDateInput.value = todayStr;
   startDateInput.min = todayStr;
 
-  document.querySelectorAll('#rent-day-presets .preset-chip').forEach((chip) => {
-    chip.classList.toggle('active', chip.getAttribute('data-days') === '7');
-  });
+  updateRentalCalculatorBreakdown();
+  dialog.showModal();
+}
+
+function openConsoleDailyRentalModal(productId) {
+  const product = state.products.find((p) => p.id === productId);
+  if (!product || !product.canDailyConsoleRent) return;
+
+  const dialog = document.getElementById('dialog-rental-calc');
+  document.getElementById('rent-modal-product-id').value = product.id;
+  const modeEl = document.getElementById('rent-modal-mode');
+  if (modeEl) modeEl.value = 'console_daily';
+
+  const titleEl = document.getElementById('rental-dialog-title');
+  if (titleEl) titleEl.textContent = '📅 เช่าเครื่องคอนโซลเหมารายวัน (ไม่มีค่าติดตั้งเครื่อง)';
+
+  const dailyRate = Number(product.consoleDailyRate || 0);
+  const deposit = Number(product.consoleDailyDeposit || 0);
+  const promos = normalizeConsoleDailyPromos(product.consoleDailyPromos);
+
+  const summaryEl = document.getElementById('rent-modal-product-summary');
+  summaryEl.innerHTML = `
+    <img src="${product.image}" alt="${escapeXml(product.name)}" style="inline-size:84px; block-size:64px; object-fit:cover; border-radius:8px;">
+    <div>
+      <span class="badge badge-amber">${escapeXml(product.platform)} • เช่าเครื่องเหมารายวัน • ฟรีค่าติดตั้ง (฿0)</span>
+      <h3 style="margin:0.25rem 0 0; font-size:1.05rem;">${escapeXml(product.name)}</h3>
+      <div style="font-size:0.84rem; color:var(--text-secondary);">
+        ราคารายวันปกติ <strong>${formatTHB(dailyRate)}/วัน</strong> • <strong style="color:#34d399;">ไม่มีค่าติดตั้งเครื่อง (฿0)</strong>${deposit > 0 ? ` • ค่ามัดจำเครื่อง <strong>${formatTHB(deposit)}</strong> (คืน 100%)` : ''}
+      </div>
+    </div>
+  `;
+
+  const presetsWrap = document.getElementById('rent-day-presets');
+  const defaultDays = promos.length > 0 ? promos[0].days : 3;
+  if (presetsWrap) {
+    const chips = [];
+    const promoDaysSet = new Set(promos.map((pr) => pr.days));
+    if (!promoDaysSet.has(1)) {
+      chips.push(`<button type="button" class="preset-chip ${defaultDays === 1 ? 'active' : ''}" data-days="1">1 วัน (${formatTHB(dailyRate)})</button>`);
+    }
+    if (!promoDaysSet.has(2)) {
+      chips.push(`<button type="button" class="preset-chip ${defaultDays === 2 ? 'active' : ''}" data-days="2">2 วัน (${formatTHB(dailyRate * 2)})</button>`);
+    }
+    promos.forEach((pr) => {
+      const reg = dailyRate * pr.days;
+      const save = Math.max(0, reg - pr.price);
+      const saveTag = save > 0 ? ` ประหยัด ${formatTHB(save)}` : '';
+      chips.push(`<button type="button" class="preset-chip ${defaultDays === pr.days ? 'active' : ''}" data-days="${pr.days}" style="border-color:rgba(245,158,11,0.55);">🔥 ${escapeXml(pr.label || `โปร ${pr.days} วัน`)} (${pr.days} วัน ${formatTHB(pr.price)}${saveTag})</button>`);
+    });
+    presetsWrap.innerHTML = chips.join('');
+  }
+
+  const installRow = document.getElementById('calc-install-fee-row');
+  if (installRow) installRow.hidden = false;
+  const returnShipRow = document.getElementById('calc-return-ship-row');
+  if (returnShipRow) returnShipRow.hidden = true;
+  const startLabel = document.getElementById('rent-start-date-label');
+  if (startLabel) startLabel.textContent = 'วันที่ต้องการเริ่มเช่า / รับเครื่อง';
+  const qtyLabel = document.getElementById('rent-qty-label');
+  if (qtyLabel) qtyLabel.textContent = 'จำนวนเครื่อง';
+  const rateLabel = document.getElementById('calc-rate-label');
+  if (rateLabel) rateLabel.textContent = 'อัตราค่าเช่า / แพ็กเกจที่เลือก:';
+  const daysLabel = document.getElementById('calc-days-label');
+  if (daysLabel) daysLabel.textContent = 'จำนวนวันเช่า × จำนวนเครื่อง:';
+  const feeLabel = document.getElementById('calc-rent-fee-label');
+  if (feeLabel) feeLabel.textContent = 'รวมค่าเช่าเครื่องเหมารายวัน:';
+  const depLabel = document.getElementById('calc-deposit-label');
+  if (depLabel) depLabel.textContent = 'ค่ามัดจำเครื่อง (ได้รับคืนเต็มจำนวนเมื่อคืนเครื่อง):';
+  const retLabel = document.getElementById('calc-return-date-label');
+  if (retLabel) retLabel.textContent = 'กำหนดวันส่งคืนเครื่อง:';
+  const submitBtn = document.getElementById('rent-modal-submit-btn');
+  if (submitBtn) {
+    submitBtn.className = 'btn btn-amber';
+    submitBtn.textContent = '📅 เพิ่มรายการเช่าเครื่องเหมารายวันลงตะกร้า';
+  }
+
+  const daysInput = document.getElementById('rent-days-input');
+  const startDateInput = document.getElementById('rent-start-date');
+  const qtyInput = document.getElementById('rent-qty-input');
+
+  const maxStock = getProductAvailableStock(product);
+  const inCartQty = getProductQtyInCart(product.id);
+  const remainingStock = Math.max(0, maxStock - inCartQty);
+
+  daysInput.value = String(defaultDays);
+  qtyInput.value = '1';
+  qtyInput.max = String(Math.max(1, remainingStock));
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+  startDateInput.value = todayStr;
+  startDateInput.min = todayStr;
 
   updateRentalCalculatorBreakdown();
   dialog.showModal();
@@ -2341,6 +2602,7 @@ function openRentalCalculatorModal(productId) {
 
 function updateRentalCalculatorBreakdown() {
   const prodId = document.getElementById('rent-modal-product-id').value;
+  const mode = document.getElementById('rent-modal-mode')?.value || 'rent';
   const product = state.products.find((p) => p.id === prodId);
   if (!product) return;
 
@@ -2349,10 +2611,36 @@ function updateRentalCalculatorBreakdown() {
   const startDate = document.getElementById('rent-start-date').value || new Date().toISOString().slice(0, 10);
   const returnDate = addDaysToDateStr(startDate, days);
 
-  const rentFee = Number(product.rentPricePerDay || 0) * days * qty;
-  const depositFee = Number(product.rentDeposit || 0) * qty;
+  document.querySelectorAll('#rent-day-presets .preset-chip').forEach((chip) => {
+    chip.classList.toggle('active', Number(chip.getAttribute('data-days')) === days);
+  });
+
   const unitShipFee = getProductShippingFee(product);
   const shipFee = unitShipFee;
+
+  if (mode === 'console_daily') {
+    const calc = calculateConsoleDailyRentPrice(product, days);
+    const rentFee = calc.totalPrice * qty;
+    const depositFee = Number(product.consoleDailyDeposit || 0) * qty;
+    const total = rentFee + depositFee + shipFee;
+
+    document.getElementById('calc-rate-display').textContent = calc.isPromo
+      ? `🔥 ${calc.promoLabel}: ${formatTHB(calc.totalPrice)} / ${days} วัน${calc.savings > 0 ? ` (ประหยัด ${formatTHB(calc.savings)}!)` : ''}`
+      : `${formatTHB(calc.dailyRate)} / วัน`;
+    document.getElementById('calc-days-display').textContent = `${days} วัน × ${qty} เครื่อง`;
+    document.getElementById('calc-rent-fee-display').textContent = formatTHB(rentFee);
+    document.getElementById('calc-deposit-display').textContent = depositFee === 0 ? '฿0 (ไม่มีมัดจำ)' : formatTHB(depositFee);
+    const shipEl = document.getElementById('calc-shipping-display');
+    if (shipEl) {
+      shipEl.textContent = shipFee === 0 ? 'ส่งฟรี! (฿0)' : `${formatTHB(shipFee)} (คิดครั้งเดียว ไม่บวกเพิ่มตามจำนวนชิ้น)`;
+    }
+    document.getElementById('calc-return-date-display').textContent = `${formatThaiDate(returnDate)} (เริ่ม ${formatThaiDate(startDate)})`;
+    document.getElementById('calc-total-display').textContent = formatTHB(total);
+    return;
+  }
+
+  const rentFee = Number(product.rentPricePerDay || 0) * days * qty;
+  const depositFee = Number(product.rentDeposit || 0) * qty;
   const total = rentFee + depositFee + shipFee;
 
   document.getElementById('calc-rate-display').textContent = `${formatTHB(product.rentPricePerDay)} / วัน`;
@@ -2465,6 +2753,72 @@ function addToCartRent(productId, rentDays, rentStartDate, qty) {
   return true;
 }
 
+function addToCartConsoleDaily(productId, rentDays, rentStartDate, qty) {
+  const product = state.products.find((p) => p.id === productId);
+  if (!product || !product.canDailyConsoleRent) return false;
+
+  const addQty = Math.max(1, Number(qty || 1));
+  const maxStock = getProductAvailableStock(product);
+  const inCart = getProductQtyInCart(productId);
+  if (maxStock <= 0 || inCart >= maxStock) {
+    showToast(`⚠️ ไม่สามารถเพิ่ม "${product.name}" ได้อีก (สินค้าในสต็อกครบจำนวน ${maxStock} ชิ้นแล้ว — รอแอดมินเพิ่มสต็อก)`, 'warning');
+    return false;
+  }
+  if (inCart + addQty > maxStock) {
+    const remaining = maxStock - inCart;
+    showToast(`⚠️ "${product.name}" เพิ่มได้อีกสูงสุด ${remaining} ชิ้น (สต็อกมี ${maxStock} ชิ้น / ในตะกร้ามี ${inCart} ชิ้น)`, 'warning');
+    return false;
+  }
+
+  const safeDays = Math.max(1, Math.floor(Number(rentDays) || 1));
+  const calc = calculateConsoleDailyRentPrice(product, safeDays);
+  const rentEndDate = addDaysToDateStr(rentStartDate, safeDays);
+  const unitShippingFee = getProductShippingFee(product);
+  const deposit = Math.max(0, Number(product.consoleDailyDeposit || 0));
+
+  const existing = state.cart.find(
+    (item) => item.productId === productId && item.mode === 'console_daily' && Number(item.rentDays) === safeDays && item.rentStartDate === rentStartDate
+  );
+  if (existing) {
+    existing.qty = Number(existing.qty || 1) + addQty;
+    existing.unitRentTotal = calc.totalPrice;
+    existing.dailyRate = calc.dailyRate;
+    existing.isPromo = calc.isPromo;
+    existing.promoLabel = calc.promoLabel;
+    existing.savings = calc.savings;
+    existing.deposit = deposit;
+    existing.shippingFee = unitShippingFee;
+  } else {
+    state.cart.push({
+      cartItemId: 'CI-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+      productId: product.id,
+      name: product.name,
+      platform: product.platform,
+      image: product.image,
+      mode: 'console_daily',
+      rentDays: safeDays,
+      dailyRate: calc.dailyRate,
+      unitRentTotal: calc.totalPrice,
+      isPromo: calc.isPromo,
+      promoLabel: calc.promoLabel,
+      savings: calc.savings,
+      deposit,
+      installFee: 0,
+      shippingFee: unitShippingFee,
+      rentStartDate,
+      rentEndDate,
+      qty: addQty
+    });
+  }
+
+  saveStateLocally();
+  renderCartBadge();
+  const promoText = calc.isPromo ? ` (${calc.promoLabel} ${formatTHB(calc.totalPrice)})` : ` (${safeDays} วัน ${formatTHB(calc.totalPrice)})`;
+  showToast(`📅 เพิ่มรายการเช่าเครื่องเหมารายวัน "${product.name}"${promoText} ฟรีค่าติดตั้ง ลงตะกร้าแล้ว!`);
+  openCartModal();
+  return true;
+}
+
 function addToCartHomeInstall(productId) {
   const product = state.products.find((p) => p.id === productId);
   if (!product || !product.canHomeInstall) return;
@@ -2563,6 +2917,9 @@ function calculateCartTotals() {
     if (item.mode === 'rent') {
       rentSubtotal += Number(item.rentRate) * Number(item.rentDays) * qty;
       depositSubtotal += Number(item.deposit) * qty;
+    } else if (item.mode === 'console_daily') {
+      rentSubtotal += Number(item.unitRentTotal ?? (Number(item.dailyRate || 0) * Number(item.rentDays || 1))) * qty;
+      depositSubtotal += Number(item.deposit || 0) * qty;
     } else if (item.mode === 'home_install') {
       installSubtotal += Number(item.installFee || 0) * qty;
     } else {
@@ -2658,6 +3015,32 @@ function renderCartModalContents() {
             ${stockNoteHtml}
           </div>
           ${buildRightCol(rentCost + depCost, '#e9d5ff')}
+        </div>
+      `;
+    } else if (item.mode === 'console_daily') {
+      const unitRent = Number(item.unitRentTotal ?? (Number(item.dailyRate || 0) * Number(item.rentDays || 1)));
+      const rentCost = unitRent * qty;
+      const depCost = Number(item.deposit || 0) * qty;
+      const promoBadge = item.isPromo
+        ? `<span style="color:#fcd34d; font-weight:700;">🔥 ${escapeXml(item.promoLabel || `โปร ${item.rentDays} วัน`)}${Number(item.savings || 0) > 0 ? ` (ประหยัด ${formatTHB(item.savings)})` : ''}</span>`
+        : `${formatTHB(item.dailyRate)}/วัน × ${item.rentDays} วัน`;
+      return `
+        <div class="cart-item">
+          <img src="${itemImg}" alt="${escapeXml(item.name)}">
+          <div>
+            <span class="badge badge-amber">📅 เช่าเครื่องเหมารายวัน (${item.rentDays} วัน • ฟรีค่าติดตั้ง ฿0)</span>
+            <h4 style="margin:0.25rem 0 0.15rem;">${escapeXml(item.name)} (${escapeXml(item.platform)})</h4>
+            <div style="font-size:0.82rem; color:var(--text-secondary);">
+              ${promoBadge} × ${qty} เครื่อง = <strong style="color:#fcd34d;">${formatTHB(rentCost)}</strong>
+              ${depCost > 0 ? ` | มัดจำเครื่อง: <strong style="color:#fcd34d;">${formatTHB(depCost)}</strong>` : ' | ไม่มีมัดจำ'}
+              | 🚚 ค่าส่ง: ${shipText}
+            </div>
+            <div style="font-size:0.78rem; color:#34d399;">
+              📅 วันเริ่มเช่า: ${formatThaiDate(item.rentStartDate)} → กำหนดส่งคืน: ${formatThaiDate(item.rentEndDate)} (🎉 ไม่มีค่าติดตั้งเครื่อง)
+            </div>
+            ${stockNoteHtml}
+          </div>
+          ${buildRightCol(rentCost + depCost, '#fcd34d')}
         </div>
       `;
     } else if (item.mode === 'home_install') {
@@ -2815,6 +3198,16 @@ function renderAdminOrdersTable() {
           <strong>${escapeXml(item.name)}</strong> (${escapeXml(item.platform)}) x${item.qty}<br>
           <span style="font-size:0.78rem; color:var(--text-muted);">
             ค่าเช่า ${formatTHB(item.rentRate * item.rentDays * item.qty)} + มัดจำ ${formatTHB(item.deposit * item.qty)} | คืน: ${formatThaiDate(item.rentEndDate)}
+          </span>
+        </div>`;
+      }
+      if (item.mode === 'console_daily') {
+        const unitRent = Number(item.unitRentTotal ?? (Number(item.dailyRate || 0) * Number(item.rentDays || 1)));
+        return `<div style="margin-block-end:0.35rem;">
+          <span class="badge badge-amber">📅 เหมารายวัน ${item.rentDays} วัน (ฟรีติดตั้ง)</span>
+          <strong>${escapeXml(item.name)}</strong> (${escapeXml(item.platform)}) x${item.qty}<br>
+          <span style="font-size:0.78rem; color:#fcd34d;">
+            ${item.isPromo ? `${escapeXml(item.promoLabel || `โปร ${item.rentDays} วัน`)} ` : ''}ค่าเช่า ${formatTHB(unitRent * item.qty)}${Number(item.deposit || 0) > 0 ? ` + มัดจำ ${formatTHB(item.deposit * item.qty)}` : ''} | คืน: ${formatThaiDate(item.rentEndDate)}
           </span>
         </div>`;
       }
@@ -3024,6 +3417,13 @@ function renderAdminProductsTable() {
     if (p.canHomeInstall) {
       rentParts.push(`<div style="margin-top:0.25rem;"><span class="badge badge-emerald">🏠 ติดบ้าน ${formatTHB(p.hourlyRate)}/ชม.</span><br><span style="font-size:0.76rem; color:#6ee7b7;">ค่าติดตั้ง ${formatTHB(p.installFee)} (${escapeXml(p.esp32DeviceId || 'ESP32')})</span></div>`);
     }
+    if (p.canDailyConsoleRent) {
+      const promos = normalizeConsoleDailyPromos(p.consoleDailyPromos);
+      const promoSummary = promos.length > 0
+        ? promos.map((pr) => `${pr.days}วัน ${formatTHB(pr.price)}`).join(' • ')
+        : 'ไม่มีค่าติดตั้ง (฿0)';
+      rentParts.push(`<div style="margin-top:0.25rem;"><span class="badge badge-amber">📅 เหมารายวัน ${formatTHB(p.consoleDailyRate)}/วัน</span><br><span style="font-size:0.74rem; color:#fde68a;">${escapeXml(promoSummary)}</span></div>`);
+    }
     const rentInfo = rentParts.length > 0
       ? rentParts.join('')
       : `<span style="color:var(--text-muted); font-size:0.82rem;">ไม่เปิดเช่า (ขายอย่างเดียว)</span>`;
@@ -3156,6 +3556,60 @@ function renderAdminProductImagesPreview() {
   });
 }
 
+function renderAdminConsolePromosEditor() {
+  const container = document.getElementById('prod-console-promos-list');
+  if (!container) return;
+  if (!Array.isArray(state.editingConsolePromos)) state.editingConsolePromos = [];
+
+  if (state.editingConsolePromos.length === 0) {
+    container.innerHTML = `
+      <div style="font-size:0.78rem; color:var(--text-muted); padding:0.55rem 0.75rem; border:1px dashed rgba(245,158,11,0.3); border-radius:var(--radius-sm);">
+        ยังไม่ได้ตั้งแพ็กเกจโปรโมชั่นหลายวัน (กด "✨ ใส่โปรตัวอย่าง" หรือ "➕ เพิ่มโปรโมชั่น" ด้านบนได้เลย)
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = state.editingConsolePromos.map((pr, idx) => `
+    <div class="admin-promo-row" data-promo-idx="${idx}">
+      <div>
+        <label style="font-size:0.7rem; color:#fde68a; display:block; margin-bottom:2px;">จำนวนวัน</label>
+        <input type="number" min="2" max="90" step="1" value="${Number(pr.days || 3)}" data-promo-field="days" data-promo-idx="${idx}" placeholder="เช่น 3">
+      </div>
+      <div>
+        <label style="font-size:0.7rem; color:#fde68a; display:block; margin-bottom:2px;">ราคาโปรเหมา (฿)</label>
+        <input type="number" min="0" step="1" value="${Number(pr.price || 0)}" data-promo-field="price" data-promo-idx="${idx}" placeholder="เช่น 790">
+      </div>
+      <div>
+        <label style="font-size:0.7rem; color:#fde68a; display:block; margin-bottom:2px;">ชื่อโปร (ไม่บังคับ)</label>
+        <input type="text" value="${escapeXml(pr.label || '')}" data-promo-field="label" data-promo-idx="${idx}" placeholder="เช่น โปร 3 วันสุดคุ้ม">
+      </div>
+      <button type="button" class="btn btn-danger btn-sm" data-remove-promo-idx="${idx}" style="align-self:end;" title="ลบโปรนี้">✕</button>
+    </div>
+  `).join('');
+
+  container.querySelectorAll('[data-promo-field]').forEach((input) => {
+    input.addEventListener('input', () => {
+      const idx = Number(input.getAttribute('data-promo-idx'));
+      const field = input.getAttribute('data-promo-field');
+      if (!state.editingConsolePromos[idx]) return;
+      if (field === 'days' || field === 'price') {
+        state.editingConsolePromos[idx][field] = Number(input.value || 0);
+      } else {
+        state.editingConsolePromos[idx][field] = input.value;
+      }
+    });
+  });
+
+  container.querySelectorAll('[data-remove-promo-idx]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const idx = Number(btn.getAttribute('data-remove-promo-idx'));
+      state.editingConsolePromos.splice(idx, 1);
+      renderAdminConsolePromosEditor();
+    });
+  });
+}
+
 function openProductFormModal(productId = null) {
   const dialog = document.getElementById('dialog-product-form');
   const titleEl = document.getElementById('product-form-title');
@@ -3205,6 +3659,23 @@ function openProductFormModal(productId = null) {
     chip.classList.toggle('active', Number(chip.getAttribute('data-hourly-preset')) === Number(hourlyVal));
   });
 
+  const canDailyConsole = prod ? Boolean(prod.canDailyConsoleRent) : false;
+  const dailyConsoleRateVal = prod ? (prod.consoleDailyRate ?? 290) : 290;
+  const dailyConsoleDepositVal = prod ? (prod.consoleDailyDeposit ?? 0) : 0;
+  const canDailyCheck = document.getElementById('prod-can-daily-console-rent');
+  if (canDailyCheck) canDailyCheck.checked = canDailyConsole;
+  const dailyRateInput = document.getElementById('prod-console-daily-rate');
+  if (dailyRateInput) dailyRateInput.value = dailyConsoleRateVal;
+  const dailyDepositInput = document.getElementById('prod-console-daily-deposit');
+  if (dailyDepositInput) dailyDepositInput.value = dailyConsoleDepositVal;
+  document.querySelectorAll('#prod-console-daily-presets .preset-chip').forEach((chip) => {
+    chip.classList.toggle('active', Number(chip.getAttribute('data-daily-console-preset')) === Number(dailyConsoleRateVal));
+  });
+  state.editingConsolePromos = prod && Array.isArray(prod.consoleDailyPromos)
+    ? prod.consoleDailyPromos.map((pr) => ({ days: Number(pr.days || 3), price: Number(pr.price || 0), label: pr.label || '' }))
+    : [];
+  renderAdminConsolePromosEditor();
+
   document.getElementById('prod-desc').value = prod ? (prod.description || '') : '';
   document.getElementById('prod-image-url').value = '';
   document.getElementById('prod-image-file').value = '';
@@ -3212,6 +3683,8 @@ function openProductFormModal(productId = null) {
   document.getElementById('prod-rent-fields').style.opacity = document.getElementById('prod-can-rent').checked ? '1' : '0.45';
   const homeFields = document.getElementById('prod-home-install-fields');
   if (homeFields) homeFields.style.opacity = canHome ? '1' : '0.45';
+  const dailyFields = document.getElementById('prod-daily-console-fields');
+  if (dailyFields) dailyFields.style.opacity = canDailyConsole ? '1' : '0.45';
   renderAdminProductImagesPreview();
   dialog.showModal();
 }
@@ -3318,14 +3791,14 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('product-grid')?.scrollIntoView({ behavior: 'smooth' });
   });
 
-  // Rental Calculator Modal interactions
-  document.querySelectorAll('#rent-day-presets .preset-chip').forEach((chip) => {
-    chip.addEventListener('click', () => {
-      document.querySelectorAll('#rent-day-presets .preset-chip').forEach((c) => c.classList.remove('active'));
-      chip.classList.add('active');
-      document.getElementById('rent-days-input').value = chip.getAttribute('data-days');
-      updateRentalCalculatorBreakdown();
-    });
+  // Rental Calculator Modal interactions (event delegation for dynamic disc & console promo presets)
+  document.getElementById('rent-day-presets')?.addEventListener('click', (e) => {
+    const chip = e.target.closest('.preset-chip');
+    if (!chip) return;
+    document.querySelectorAll('#rent-day-presets .preset-chip').forEach((c) => c.classList.remove('active'));
+    chip.classList.add('active');
+    document.getElementById('rent-days-input').value = chip.getAttribute('data-days');
+    updateRentalCalculatorBreakdown();
   });
 
   ['rent-days-input', 'rent-start-date', 'rent-qty-input'].forEach((id) => {
@@ -3336,10 +3809,13 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('rental-calc-form')?.addEventListener('submit', (e) => {
     e.preventDefault();
     const prodId = document.getElementById('rent-modal-product-id').value;
-    const days = Math.max(1, Number(document.getElementById('rent-days-input').value) || 7);
+    const mode = document.getElementById('rent-modal-mode')?.value || 'rent';
+    const days = Math.max(1, Number(document.getElementById('rent-days-input').value) || 1);
     const startDate = document.getElementById('rent-start-date').value;
     const qty = Math.max(1, Number(document.getElementById('rent-qty-input').value) || 1);
-    const added = addToCartRent(prodId, days, startDate, qty);
+    const added = mode === 'console_daily'
+      ? addToCartConsoleDaily(prodId, days, startDate, qty)
+      : addToCartRent(prodId, days, startDate, qty);
     if (added) {
       document.getElementById('dialog-rental-calc').close();
     }
@@ -3409,10 +3885,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const totals = calculateCartTotals();
     const hasBuy = state.cart.some((i) => i.mode === 'buy');
     const hasRent = state.cart.some((i) => i.mode === 'rent');
+    const hasConsoleDaily = state.cart.some((i) => i.mode === 'console_daily');
     const hasHomeInstall = state.cart.some((i) => i.mode === 'home_install');
     const typeParts = [];
     if (hasBuy) typeParts.push('ซื้อสินค้า');
     if (hasHomeInstall) typeParts.push('เช่าเครื่องติดบ้าน (ESP32)');
+    if (hasConsoleDaily) typeParts.push('เช่าเครื่องเหมารายวัน (ฟรีติดตั้ง)');
     if (hasRent) typeParts.push('เช่าแผ่นเกมรายวัน');
     const orderTypeLabel = typeParts.join(' + ') || 'ซื้อสินค้า';
 
@@ -3746,6 +4224,44 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  // Daily Flat-Rate Console Rental Admin Form Controls
+  document.getElementById('prod-can-daily-console-rent')?.addEventListener('change', (e) => {
+    const dailyFields = document.getElementById('prod-daily-console-fields');
+    if (dailyFields) dailyFields.style.opacity = e.target.checked ? '1' : '0.45';
+  });
+
+  document.querySelectorAll('#prod-console-daily-presets .preset-chip').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      const val = Number(chip.getAttribute('data-daily-console-preset') || 0);
+      const input = document.getElementById('prod-console-daily-rate');
+      if (input) input.value = val;
+      document.querySelectorAll('#prod-console-daily-presets .preset-chip').forEach((c) => {
+        c.classList.toggle('active', c === chip);
+      });
+    });
+  });
+
+  document.getElementById('btn-add-console-promo')?.addEventListener('click', () => {
+    if (!Array.isArray(state.editingConsolePromos)) state.editingConsolePromos = [];
+    const baseRate = Math.max(100, Number(document.getElementById('prod-console-daily-rate')?.value || 290));
+    const existingDays = state.editingConsolePromos.map((p) => Number(p.days || 0));
+    const nextDays = existingDays.length === 0 ? 3 : (existingDays.includes(5) ? Math.max(...existingDays) + 2 : 5);
+    const suggestedPrice = Math.round((baseRate * nextDays * 0.85) / 10) * 10;
+    state.editingConsolePromos.push({ days: nextDays, price: suggestedPrice, label: `โปร ${nextDays} วันสุดคุ้ม` });
+    renderAdminConsolePromosEditor();
+  });
+
+  document.getElementById('btn-preset-console-promos')?.addEventListener('click', () => {
+    const baseRate = Math.max(100, Number(document.getElementById('prod-console-daily-rate')?.value || 290));
+    state.editingConsolePromos = [
+      { days: 3, price: Math.round((baseRate * 3 * 0.9) / 10) * 10, label: 'โปร 3 วันสุดคุ้ม' },
+      { days: 5, price: Math.round((baseRate * 5 * 0.82) / 10) * 10, label: 'โปร 5 วันจัดเต็ม' },
+      { days: 7, price: Math.round((baseRate * 7 * 0.75) / 10) * 10, label: 'โปร 7 วันรายสัปดาห์' }
+    ];
+    renderAdminConsolePromosEditor();
+    showToast('✨ ใส่โปรตัวอย่าง (3 / 5 / 7 วัน) เรียบร้อยแล้ว แก้ไขตัวเลขได้ตามต้องการครับ');
+  });
+
   document.getElementById('btn-trigger-image-file')?.addEventListener('click', (e) => {
     e.preventDefault();
     const fileInput = document.getElementById('prod-image-file');
@@ -3851,6 +4367,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const esp32DeviceId = canHomeInstall
       ? (document.getElementById('prod-esp32-device-id')?.value.trim() || `ESP32-${String(platform || 'CON').toUpperCase()}-01`)
       : '';
+    const canDailyConsoleRent = Boolean(document.getElementById('prod-can-daily-console-rent')?.checked);
+    const consoleDailyRate = canDailyConsoleRent ? Math.max(0, Number(document.getElementById('prod-console-daily-rate')?.value || 0)) : 0;
+    const consoleDailyDeposit = canDailyConsoleRent ? Math.max(0, Number(document.getElementById('prod-console-daily-deposit')?.value || 0)) : 0;
+    const consoleDailyPromos = canDailyConsoleRent ? normalizeConsoleDailyPromos(state.editingConsolePromos) : [];
     const description = document.getElementById('prod-desc').value.trim();
     const pendingUrl = normalizeImageUrl(document.getElementById('prod-image-url').value);
 
@@ -3887,6 +4407,10 @@ document.addEventListener('DOMContentLoaded', () => {
       installFee,
       hourlyRate,
       esp32DeviceId,
+      canDailyConsoleRent,
+      consoleDailyRate,
+      consoleDailyDeposit,
+      consoleDailyPromos,
       description,
       image: finalImages[0],
       images: finalImages,
@@ -4445,6 +4969,10 @@ function renderOrderLookupList(orders, isNewOrder = false, sentToSheet = false, 
       if (item.mode === 'rent') {
         return `<li>[เช่าแผ่น ${item.rentDays} วัน] <strong>${escapeXml(item.name)}</strong> (${escapeXml(item.platform)}) x${item.qty} — ค่าเช่า ${formatTHB(item.rentRate * item.rentDays * item.qty)} + มัดจำแผ่น ${formatTHB(item.deposit * item.qty)} (คืนแผ่นวันที่ ${formatThaiDate(item.rentEndDate)})</li>`;
       }
+      if (item.mode === 'console_daily') {
+        const unitRent = Number(item.unitRentTotal ?? (Number(item.dailyRate || 0) * Number(item.rentDays || 1)));
+        return `<li>[📅 เช่าเครื่องเหมารายวัน ${item.rentDays} วัน • ฟรีค่าติดตั้ง] <strong>${escapeXml(item.name)}</strong> (${escapeXml(item.platform)}) x${item.qty} — ${item.isPromo ? `${escapeXml(item.promoLabel || `โปร ${item.rentDays} วัน`)} ` : ''}ค่าเช่า ${formatTHB(unitRent * item.qty)}${Number(item.deposit || 0) > 0 ? ` + มัดจำ ${formatTHB(item.deposit * item.qty)}` : ''} (คืนเครื่องวันที่ ${formatThaiDate(item.rentEndDate)})</li>`;
+      }
       if (item.mode === 'home_install') {
         return `<li>[🏠 เช่าเครื่องติดตั้งที่บ้าน + บอร์ด ESP32] <strong>${escapeXml(item.name)}</strong> (${escapeXml(item.platform)}) x${item.qty} — ค่าติดตั้ง ${formatTHB((item.installFee || 0) * item.qty)} + เรทรายชั่วโมง <strong style="color:#34d399;">${formatTHB(item.hourlyRate || 0)}/ชม.</strong> (คิดตามเวลาเปิดเครื่องจริงผ่านบอร์ด <code>${escapeXml(item.esp32DeviceId || 'ESP32')}</code>)</li>`;
       }
@@ -4568,8 +5096,9 @@ function renderOrderLookupList(orders, isNewOrder = false, sentToSheet = false, 
 function getContractMetadata(order) {
   const items = Array.isArray(order?.items) ? order.items : [];
   const hasRent = items.some((i) => i.mode === 'rent');
+  const hasConsoleDaily = items.some((i) => i.mode === 'console_daily');
   const hasHomeInstall = items.some((i) => i.mode === 'home_install');
-  const hasBuy = items.some((i) => i.mode === 'buy' || (!i.mode && i.mode !== 'rent' && i.mode !== 'home_install'));
+  const hasBuy = items.some((i) => i.mode === 'buy' || (!i.mode && i.mode !== 'rent' && i.mode !== 'console_daily' && i.mode !== 'home_install'));
   const contractNo = order?.contractNo || ('CTR-' + (order?.id || 'DRAFT'));
 
   let title = 'หนังสือสัญญาซื้อขายสินค้าและใบสำคัญรับเงินอิเล็กทรอนิกส์';
@@ -4577,7 +5106,7 @@ function getContractMetadata(order) {
   let shortLabel = 'สัญญาซื้อขายสินค้า';
   let typeBadge = 'สัญญาซื้อขายสินค้า (Sales Agreement)';
 
-  if (hasHomeInstall && (hasRent || hasBuy)) {
+  if (hasHomeInstall && (hasRent || hasConsoleDaily || hasBuy)) {
     title = 'หนังสือสัญญาเช่าเครื่องคอนโซลติดตั้งที่บ้าน (รายชั่วโมง ESP32) และสัญญาเช่า/ซื้อขายอิเล็กทรอนิกส์';
     subtitle = 'Electronic Home Console Installation (ESP32 Hourly Meter) & Rental/Sales Agreement';
     shortLabel = 'สัญญาเช่าเครื่องติดบ้านและซื้อ/เช่า';
@@ -4587,6 +5116,16 @@ function getContractMetadata(order) {
     subtitle = 'Electronic Home Console Installation & Postpaid Hourly Meter Agreement';
     shortLabel = 'สัญญาเช่าเครื่องติดตั้งที่บ้าน';
     typeBadge = 'สัญญาเช่าคอนโซลติดตั้งที่บ้าน (ESP32 Hourly Meter)';
+  } else if (hasConsoleDaily && (hasRent || hasBuy)) {
+    title = 'หนังสือสัญญาเช่าเครื่องคอนโซลเหมารายวัน (ฟรีค่าติดตั้ง) และสัญญาเช่า/ซื้อขายอิเล็กทรอนิกส์';
+    subtitle = 'Electronic Flat-Rate Daily Console Rental & Merchandise Agreement';
+    shortLabel = 'สัญญาเช่าเครื่องเหมารายวันและซื้อ/เช่า';
+    typeBadge = 'สัญญาเช่าเครื่องเหมารายวัน + ซื้อ/เช่า';
+  } else if (hasConsoleDaily) {
+    title = 'หนังสือสัญญาเช่าเครื่องเกมคอนโซลเหมารายวันอิเล็กทรอนิกส์ (ไม่มีค่าติดตั้งเครื่อง)';
+    subtitle = 'Electronic Flat-Rate Daily Console Rental Agreement (Zero Installation Fee)';
+    shortLabel = 'สัญญาเช่าเครื่องเหมารายวัน';
+    typeBadge = 'สัญญาเช่าเครื่องเหมารายวัน (ฟรีค่าติดตั้ง)';
   } else if (hasRent && hasBuy) {
     title = 'หนังสือสัญญาเช่าแผ่นเกมรายวันและสัญญาซื้อขายสินค้าอิเล็กทรอนิกส์';
     subtitle = 'Electronic Game Disc Rental & Merchandise Sales Agreement';
@@ -4599,7 +5138,7 @@ function getContractMetadata(order) {
     typeBadge = 'สัญญาเช่าแผ่นเกมรายวัน (Rental Agreement)';
   }
 
-  return { contractNo, hasRent, hasHomeInstall, hasBuy, title, subtitle, shortLabel, typeBadge };
+  return { contractNo, hasRent, hasConsoleDaily, hasHomeInstall, hasBuy, title, subtitle, shortLabel, typeBadge };
 }
 
 function buildOrderContractHtml(order, options = { unmasked: true, isDraft: false }) {
@@ -4621,24 +5160,32 @@ function buildOrderContractHtml(order, options = { unmasked: true, isDraft: fals
   const items = Array.isArray(order?.items) ? order.items : [];
   const rowsHtml = items.map((item, idx) => {
     const isRent = item.mode === 'rent';
+    const isConsoleDaily = item.mode === 'console_daily';
     const isHomeInstall = item.mode === 'home_install';
+    const unitDailyRent = Number(item.unitRentTotal ?? (Number(item.dailyRate || 0) * Number(item.rentDays || 1)));
     const typeText = isRent
       ? `<strong style="color:#6d28d9;">💿 เช่ารายวัน (${Number(item.rentDays || 1)} วัน)</strong>`
-      : isHomeInstall
-        ? `<strong style="color:#059669;">🏠 เช่าเครื่องติดบ้าน (ESP32)</strong>`
-        : `<strong style="color:#0369a1;">🛒 ซื้อขาด</strong>`;
-    const periodText = isRent
-      ? `เริ่มเช่า: ${formatThaiDate(item.rentStartDate)}<br><strong>กำหนดส่งคืน: ${formatThaiDate(item.rentEndDate)}</strong>`
+      : isConsoleDaily
+        ? `<strong style="color:#b45309;">📅 เช่าเครื่องเหมารายวัน (${Number(item.rentDays || 1)} วัน • ฟรีติดตั้ง)</strong>`
+        : isHomeInstall
+          ? `<strong style="color:#059669;">🏠 เช่าเครื่องติดบ้าน (ESP32)</strong>`
+          : `<strong style="color:#0369a1;">🛒 ซื้อขาด</strong>`;
+    const periodText = (isRent || isConsoleDaily)
+      ? `เริ่มเช่า: ${formatThaiDate(item.rentStartDate)}<br><strong>กำหนดส่งคืน: ${formatThaiDate(item.rentEndDate)}</strong>${isConsoleDaily ? '<br><span style="font-size:0.74rem; color:#059669;">ฟรีค่าติดตั้งเครื่อง (฿0)</span>' : ''}`
       : isHomeInstall
         ? `ติดตั้งที่บ้านลูกค้า<br><strong>คิดตามจริง ${formatTHB(item.hourlyRate || 0)}/ชม.</strong><br><span style="font-size:0.74rem; color:#0284c7;">บอร์ด: ${escapeXml(item.esp32DeviceId || 'ESP32')}</span>`
         : `โอนกรรมสิทธิ์ถาวร`;
     const amountText = isRent
       ? `${formatTHB(Number(item.rentRate || 0) * Number(item.rentDays || 1) * Number(item.qty || 1))}<br><span style="font-size:0.75rem; color:#64748b;">(${formatTHB(item.rentRate)}/วัน × ${item.rentDays} วัน)</span>`
-      : isHomeInstall
-        ? `${formatTHB(Number(item.installFee || 0) * Number(item.qty || 1))}<br><span style="font-size:0.75rem; color:#059669;">(ค่าติดตั้ง • รายชั่วโมงคิดตามจริง)</span>`
-        : `${formatTHB(Number(item.price || 0) * Number(item.qty || 1))}`;
-    const depositText = isRent
-      ? `<strong>${formatTHB(Number(item.deposit || 0) * Number(item.qty || 1))}</strong><br><span style="font-size:0.74rem; color:#059669;">(ได้รับคืน 100%)</span>`
+      : isConsoleDaily
+        ? `${formatTHB(unitDailyRent * Number(item.qty || 1))}<br><span style="font-size:0.75rem; color:#b45309;">(${item.isPromo ? escapeXml(item.promoLabel || `โปร ${item.rentDays} วัน`) : `${formatTHB(item.dailyRate)}/วัน × ${item.rentDays} วัน`})</span>`
+        : isHomeInstall
+          ? `${formatTHB(Number(item.installFee || 0) * Number(item.qty || 1))}<br><span style="font-size:0.75rem; color:#059669;">(ค่าติดตั้ง • รายชั่วโมงคิดตามจริง)</span>`
+          : `${formatTHB(Number(item.price || 0) * Number(item.qty || 1))}`;
+    const depositText = (isRent || isConsoleDaily)
+      ? (Number(item.deposit || 0) > 0
+        ? `<strong>${formatTHB(Number(item.deposit || 0) * Number(item.qty || 1))}</strong><br><span style="font-size:0.74rem; color:#059669;">(ได้รับคืน 100%)</span>`
+        : `<span style="font-size:0.75rem; color:#059669;">฿0 (ไม่มีมัดจำ)</span>`)
       : isHomeInstall
         ? `<span style="font-size:0.75rem; color:#0284c7;">นับเวลา Real-time</span>`
         : `-`;
@@ -4668,6 +5215,7 @@ function buildOrderContractHtml(order, options = { unmasked: true, isDraft: fals
   ), 0));
 
   const homeInstallClauseTitleNum = meta.hasHomeInstall ? `ข้อที่ ${nextClauseNum++}` : '';
+  const consoleDailyClauseTitleNum = meta.hasConsoleDaily ? `ข้อที่ ${nextClauseNum++}` : '';
   const rentClauseTitleNum = meta.hasRent ? `ข้อที่ ${nextClauseNum++}` : '';
   const salesClauseNum = `ข้อที่ ${nextClauseNum++}`;
   const sigClauseNum = `ข้อที่ ${nextClauseNum}`;
@@ -4681,6 +5229,16 @@ function buildOrderContractHtml(order, options = { unmasked: true, isDraft: fals
         <li><strong>การแจ้งขอคืนเครื่องคอนโซลโดยลูกค้า:</strong> <strong>หากลูกค้ามีความประสงค์จะขอคืนเครื่องคอนโซล ให้ติดต่อแจ้งมายังทางร้านผ่านเบอร์โทรศัพท์ <span style="color:#0284c7;">0826716780</span></strong> เพื่อนัดหมายวัน-เวลาในการเข้ารับเครื่องคืนและสรุปยอดค่าบริการรายชั่วโมงสะสมตามจริง</li>
         <li><strong style="color:#b91c1c;">เงื่อนไขกรณีทางร้านขอคืนเครื่องคอนโซล (แจ้งเหตุผลล่วงหน้าและรับคืนที่บ้านฟรี):</strong> <strong>หากทางร้านมีความจำเป็นต้องขอคืนเครื่องคอนโซล ผู้เช่าจะต้องส่งมอบเครื่องคืนให้แก่ทางร้าน โดยทางร้านจะเดินทางไปรับเครื่องคืนถึงบ้านลูกค้าโดยไม่เสียค่าบริการใดๆ ทั้งสิ้น</strong> ทั้งนี้ การขอคืนเครื่องจะมีเหตุผลอันสมควร โดย<strong>ทางร้านจะติดต่อหาลูกค้าเพื่อแจ้งให้ทราบล่วงหน้าว่าจะขอคืนตัวคอนโซล พร้อมอธิบายเหตุผลให้ลูกค้าทราบอย่างชัดเจน</strong> รวมถึงกรณีที่ลูกค้านำเครื่องไปใช้เช่ารายชั่วโมงแล้วหยุดใช้เครื่องติดต่อกันเป็นเวลาเกิน 2 วัน (48 ชั่วโมง) ทางร้านขอติดต่อนำเครื่องคืนเพื่อไม่ให้เสียโอกาสของลูกค้าคนอื่นที่รอเครื่อง โดยอ้างอิงจากเวลาเปิดใช้งานล่าสุด (Last Active) ในระบบสมาร์ทบอร์ด ESP32 และผู้เช่าตกลงให้ความร่วมมือในการส่งมอบเครื่องคืนพร้อมชำระค่าบริการรายชั่วโมงสะสมตามจริง</li>
         <li><strong>การห้ามดัดแปลงหรือถอดอุปกรณ์วัดเวลา (ESP32 Tamper Policy):</strong> ผู้เช่าตกลงจะไม่แกะ ถอด ดัดแปลง หรือรบกวนการทำงานของบอร์ด ESP32 และสายสัญญาณที่เชื่อมต่อกับเครื่องคอนโซล รวมถึงดูแลรักษาเครื่องคอนโซลให้อยู่ในสภาพปกติ</li>
+      </ol>
+    `
+    : '';
+
+  const consoleDailyClausesHtml = meta.hasConsoleDaily
+    ? `
+      <div class="contract-section-title">${consoleDailyClauseTitleNum}: ข้อตกลงการเช่าเครื่องเกมคอนโซลเหมารายวัน (ไม่มีค่าติดตั้งเครื่อง)</div>
+      <ol class="contract-clauses">
+        <li><strong>กรรมสิทธิ์และค่าบริการเหมารายวัน:</strong> เครื่องเกมคอนโซลและอุปกรณ์เสริมตามรายการเช่า ถือเป็นกรรมสิทธิ์ของ <strong>ร้าน TakeIT Gaming &amp; Console</strong> ตลอดอายุสัญญา โดยบริการเช่าเครื่องเหมารายวันนี้ <strong>ไม่มีค่าติดตั้งเครื่อง (฿0)</strong> คิดค่าบริการตามจำนวนวันหรือแพ็กเกจโปรโมชั่นที่ตกลงไว้ในตารางข้อที่ 1</li>
+        <li><strong>กำหนดการส่งคืนเครื่องและการติดต่อ:</strong> ผู้เช่าตกลงดูแลรักษาเครื่องคอนโซลและอุปกรณ์เสริมให้อยู่ในสภาพปกติ และส่งคืนภายในวันครบกำหนดที่ระบุในสัญญา หากต้องการต่ออายุการเช่าหรือแจ้งนัดคืนเครื่อง กรุณาติดต่อทางร้านผ่านเบอร์โทรศัพท์ <strong>0826716780</strong></li>
       </ol>
     `
     : '';
@@ -4778,6 +5336,7 @@ function buildOrderContractHtml(order, options = { unmasked: true, isDraft: fals
       </div>
 
       ${homeInstallClausesHtml}
+      ${consoleDailyClausesHtml}
       ${rentalClausesHtml}
 
       <div class="contract-section-title">${salesClauseNum}: ข้อตกลงการซื้อขาย การจัดส่ง และการรับประกันสินค้า</div>
@@ -4820,6 +5379,10 @@ function buildOrderContractPlainText(order, unmasked = true) {
     const shipStr = unitShip === 0 ? 'ส่งฟรี' : `${formatTHB(unitShip)} (คิดค่าส่งครั้งเดียวตามชิ้นที่แพงสุด)`;
     if (item.mode === 'rent') {
       return `${idx + 1}. [เช่าแผ่น ${item.rentDays} วัน] ${item.name} (${item.platform}) x${item.qty} | ค่าเช่า ${formatTHB(item.rentRate * item.rentDays * item.qty)} + มัดจำแผ่น ${formatTHB(item.deposit * item.qty)} + ค่าส่ง ${shipStr} | เริ่มเช่า: ${formatThaiDate(item.rentStartDate)} -> กำหนดส่งคืน: ${formatThaiDate(item.rentEndDate)}`;
+    }
+    if (item.mode === 'console_daily') {
+      const unitRent = Number(item.unitRentTotal ?? (Number(item.dailyRate || 0) * Number(item.rentDays || 1)));
+      return `${idx + 1}. [เช่าเครื่องเหมารายวัน ${item.rentDays} วัน • ฟรีค่าติดตั้ง ฿0] ${item.name} (${item.platform}) x${item.qty} | ${item.isPromo ? `${item.promoLabel || `โปร ${item.rentDays} วัน`} ` : ''}ค่าเช่า ${formatTHB(unitRent * item.qty)}${Number(item.deposit || 0) > 0 ? ` + มัดจำ ${formatTHB(item.deposit * item.qty)}` : ''} + ค่าส่ง ${shipStr} | เริ่มเช่า: ${formatThaiDate(item.rentStartDate)} -> กำหนดส่งคืน: ${formatThaiDate(item.rentEndDate)}`;
     }
     if (item.mode === 'home_install') {
       return `${idx + 1}. [เช่าเครื่องติดตั้งที่บ้าน + บอร์ด ESP32] ${item.name} (${item.platform}) x${item.qty} | ค่าติดตั้งเริ่มต้น ${formatTHB((item.installFee || 0) * item.qty)} (฿500 เฉพาะพื้นที่ภาคกลาง หากนอกเหนือจากนี้บวกเพิ่มตามระยะทาง) | เรทรายชั่วโมง ${formatTHB(item.hourlyRate || 0)}/ชม. (คิดตามจริงผ่านบอร์ด ${item.esp32DeviceId || 'ESP32'})`;

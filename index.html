@@ -571,6 +571,9 @@
         <button type="button" class="tab-btn" data-category="home_console">
           🏠 เช่าเครื่องติดบ้าน (รายชั่วโมง Real-time)
         </button>
+        <button type="button" class="tab-btn" data-category="daily_console">
+          📅 เช่าเครื่องเหมารายวัน (ฟรีค่าติดตั้ง)
+        </button>
         <button type="button" class="tab-btn" data-category="console">
           🕹️ เครื่องเกมคอนโซล
         </button>
@@ -598,6 +601,7 @@
 
         <select id="filter-mode" aria-label="กรองตามรูปแบบการซื้อหรือเช่า">
           <option value="all">ซื้อขาด &amp; เช่าทั้งหมด</option>
+          <option value="daily_console_available">📅 เฉพาะเครื่องเช่าเหมารายวัน (ไม่มีค่าติดตั้ง + มีโปรหลายวัน)</option>
           <option value="home_install_available">🏠 เฉพาะเครื่องที่รับติดตั้งที่บ้าน (คิดรายชั่วโมง ESP32)</option>
           <option value="rent_available">💿 เฉพาะแผ่นที่มีบริการเช่ารายวัน</option>
           <option value="ready">✅ เฉพาะสินค้าพร้อมส่งทันที</option>
@@ -666,13 +670,14 @@
     </div>
     <form id="rental-calc-form" class="dialog-body">
       <input type="hidden" id="rent-modal-product-id">
+      <input type="hidden" id="rent-modal-mode" value="rent">
 
       <div id="rent-modal-product-summary" style="display:flex; gap:1rem; align-items:center; margin-block-end:1rem;">
       </div>
 
       <div class="rental-calc-panel">
         <div class="field">
-          <label for="rent-days-input">จำนวนวันที่ต้องการเช่า (วัน)</label>
+          <label for="rent-days-input" id="rent-days-label">จำนวนวันที่ต้องการเช่า (วัน)</label>
           <span id="rent-days-hint" class="hint">เลือกปุ่มลัดด้านล่าง หรือพิมพ์จำนวนวันที่ต้องการเช่าเองได้เลย</span>
           <div class="day-presets" id="rent-day-presets">
             <button type="button" class="preset-chip" data-days="3">3 วัน</button>
@@ -688,30 +693,34 @@
 
         <div class="form-grid-2">
           <div class="field">
-            <label for="rent-start-date">วันที่ต้องการเริ่มเช่า / รับแผ่น</label>
+            <label for="rent-start-date" id="rent-start-date-label">วันที่ต้องการเริ่มเช่า / รับแผ่น</label>
             <input type="date" id="rent-start-date" required>
           </div>
           <div class="field">
-            <label for="rent-qty-input">จำนวนแผ่น</label>
+            <label for="rent-qty-input" id="rent-qty-label">จำนวนแผ่น</label>
             <input type="number" id="rent-qty-input" min="1" max="10" value="1" required>
           </div>
         </div>
 
         <div class="calc-breakdown" aria-live="polite">
+          <div class="calc-line" id="calc-install-fee-row" hidden>
+            <span>ค่าติดตั้งเครื่อง:</span>
+            <strong style="color:#34d399;">🎉 ไม่มีค่าติดตั้งเครื่อง (฿0)</strong>
+          </div>
           <div class="calc-line">
-            <span>ราคาเช่าต่อวัน:</span>
+            <span id="calc-rate-label">ราคาเช่าต่อวัน:</span>
             <strong id="calc-rate-display">฿0 / วัน</strong>
           </div>
           <div class="calc-line">
-            <span>จำนวนวันเช่า × จำนวนแผ่น:</span>
+            <span id="calc-days-label">จำนวนวันเช่า × จำนวนแผ่น:</span>
             <strong id="calc-days-display">7 วัน × 1 แผ่น</strong>
           </div>
           <div class="calc-line">
-            <span>รวมค่าเช่าแผ่นเกม:</span>
+            <span id="calc-rent-fee-label">รวมค่าเช่าแผ่นเกม:</span>
             <strong id="calc-rent-fee-display" style="color:var(--accent-cyan);">฿0</strong>
           </div>
           <div class="calc-line">
-            <span>ค่ามัดจำแผ่นเกม (ได้รับคืนเต็มจำนวนเมื่อคืนแผ่น):</span>
+            <span id="calc-deposit-label">ค่ามัดจำแผ่นเกม (ได้รับคืนเต็มจำนวนเมื่อคืนแผ่น):</span>
             <strong id="calc-deposit-display" style="color:#fcd34d;">฿0</strong>
           </div>
           <div class="calc-line">
@@ -719,10 +728,10 @@
             <strong id="calc-shipping-display" style="color:#38bdf8;">฿0</strong>
           </div>
           <div class="calc-line">
-            <span>กำหนดวันส่งคืนแผ่น:</span>
+            <span id="calc-return-date-label">กำหนดวันส่งคืนแผ่น:</span>
             <strong id="calc-return-date-display" style="color:#34d399;">-</strong>
           </div>
-          <div class="calc-line">
+          <div class="calc-line" id="calc-return-ship-row">
             <span>ค่าส่งของกลับตอนคืนแผ่นเกม:</span>
             <strong style="color:#34d399;">🚚 ทางร้านจ่ายเงินค่าส่งของกลับให้ฟรี!</strong>
           </div>
@@ -736,7 +745,7 @@
       <div class="dialog-footer"
         style="padding-inline:0; padding-block-end:0; margin-block-start:1.25rem; background:transparent;">
         <button type="button" class="btn btn-outline" data-close-dialog="dialog-rental-calc">ยกเลิก</button>
-        <button type="submit" class="btn btn-rent">💿 เพิ่มรายการเช่าแผ่นลงตะกร้า</button>
+        <button type="submit" class="btn btn-rent" id="rent-modal-submit-btn">💿 เพิ่มรายการเช่าแผ่นลงตะกร้า</button>
       </div>
     </form>
   </dialog>
@@ -1134,6 +1143,59 @@
             <span class="hint">เช่น <code>ESP32-PS5-01</code> หรือ <code>ESP32-NSW-01</code>
               เพื่อใช้ซิงค์ชั่วโมงใช้งานแบบ Real-time ให้ลูกค้ากดดูได้</span>
             <input type="text" id="prod-esp32-device-id" placeholder="เช่น ESP32-PS5-01">
+          </div>
+        </div>
+      </div>
+
+      <!-- Daily Flat-Rate Console Rental (No Installation Fee + Multi-Day Promos) Config Box -->
+      <div class="highlight-box"
+        style="margin-block-end:1.1rem; padding:1rem; border-color:rgba(245,158,11,0.48); background:rgba(245,158,11,0.08);">
+        <div style="display:flex; align-items:center; gap:0.6rem; margin-block-end:0.75rem;">
+          <input type="checkbox" id="prod-can-daily-console-rent" style="inline-size:20px; block-size:20px;">
+          <label for="prod-can-daily-console-rent" style="margin:0; font-weight:700; color:#fcd34d; cursor:pointer;">
+            📅 เปิดบริการ "เช่าเครื่องเหมารายวัน (ไม่มีค่าติดตั้งเครื่อง + ตั้งโปรหลายวันได้)"
+          </label>
+        </div>
+
+        <div id="prod-daily-console-fields">
+          <div class="form-grid-2" style="margin-block-end:0.8rem;">
+            <div class="field" style="margin-block-end:0;">
+              <label for="prod-console-daily-rate" style="color:#fcd34d;">ราคารายวันปกติ (บาท / วัน)</label>
+              <span class="hint">ไม่มีค่าติดตั้งเครื่อง (฿0) — คิดตามจำนวนวันหรือราคาโปรด้านล่าง</span>
+              <div id="prod-console-daily-presets"
+                style="display:flex; flex-wrap:wrap; gap:0.35rem; margin-block:0.35rem 0.5rem;">
+                <button type="button" class="preset-chip" data-daily-console-preset="190">฿190/วัน</button>
+                <button type="button" class="preset-chip" data-daily-console-preset="250">฿250/วัน</button>
+                <button type="button" class="preset-chip" data-daily-console-preset="290">฿290/วัน</button>
+                <button type="button" class="preset-chip" data-daily-console-preset="350">฿350/วัน</button>
+                <button type="button" class="preset-chip" data-daily-console-preset="450">฿450/วัน</button>
+              </div>
+              <input type="number" id="prod-console-daily-rate" min="0" step="1" value="290">
+            </div>
+
+            <div class="field" style="margin-block-end:0;">
+              <label for="prod-console-daily-deposit" style="color:#fde68a;">ค่ามัดจำเครื่อง (บาท — ใส่ 0 หากไม่มีมัดจำ)</label>
+              <span class="hint">ถ้ามีมัดจำจะบวกในยอดโอนและคืนให้ลูกค้าเต็มจำนวนเมื่อคืนเครื่อง</span>
+              <input type="number" id="prod-console-daily-deposit" min="0" step="1" value="0">
+            </div>
+          </div>
+
+          <div style="border-block-start:1px dashed rgba(245,158,11,0.35); padding-block-start:0.75rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; margin-block-end:0.5rem;">
+              <div>
+                <strong style="color:#fcd34d; font-size:0.88rem;">🏷️ แพ็กเกจโปรโมชั่นเหมารายวัน (เช่น 3 วันเท่านี้, 5 วันเท่านี้)</strong>
+                <span class="hint" style="display:block;">กำหนดจำนวนวันและราคาเหมาพิเศษได้เลย ลูกค้าเลือกวันตรงโปรระบบจะคิดราคาโปรให้อัตโนมัติ</span>
+              </div>
+              <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
+                <button type="button" class="btn btn-outline btn-sm" id="btn-preset-console-promos">
+                  ✨ ใส่โปรตัวอย่าง (3 / 5 / 7 วัน)
+                </button>
+                <button type="button" class="btn btn-amber btn-sm" id="btn-add-console-promo">
+                  ➕ เพิ่มโปรโมชั่น
+                </button>
+              </div>
+            </div>
+            <div id="prod-console-promos-list" style="display:flex; flex-direction:column; gap:0.45rem;"></div>
           </div>
         </div>
       </div>
@@ -1725,7 +1787,7 @@
 
   <!-- HEIC/HEIF image decoder for Apple iPhone photos in Chrome & other browsers -->
   <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js" defer></script>
-  <script src="app.js?v=20261122-esp32-14" defer></script>
+  <script src="app.js?v=20261125-daily-15" defer></script>
 </body>
 
 </html>
